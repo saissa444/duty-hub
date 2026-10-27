@@ -688,7 +688,7 @@ pre.footer{background:var(--line2);border-radius:10px}
     </table></div>
     <p class="sub" id="otNote"></p>
     <details class="bkdiff" id="otDiffList" hidden></details>
-    <p class="sub">計算方式：依實際班別（含班別修改）計算。白天班上班滿 9 小時之後算加班（例：09–21 → 18:00 起 3 小時）。18 點以後起班跨夜者，隔日 06:00–09:00 算加班；09:00 後繼續上班，超過 9 小時的部分也算。加班時段內登錄的差假（補休、休假、公假、事假等），以及在勤務分配表上把這個人的格子清空的時段，都會扣掉，例如 09–21 請 12–19，只算 19–21 共 2 小時。週六、週日標為「假日加班」，國定假日請手動改類別。</p>
+    <p class="sub">計算方式：依實際班別（含班別修改）計算。白天班上班滿 9 小時之後算加班（例：09–21 → 18:00 起 3 小時）。18 點以後起班跨夜者，隔日 06:00–09:00 算加班；09:00 後繼續上班，超過 9 小時的部分也算。加班時段內登錄的差假（補休、休假、公假、事假等），兼課時段（設定頁的「兼課時段」），以及在勤務分配表上把這個人的格子清空的時段，都會扣掉，例如 09–21 請 12–19，只算 19–21 共 2 小時。週六、週日標為「假日加班」，國定假日請手動改類別。</p>
   </div>
 </main>
 
@@ -2331,6 +2331,19 @@ window.XLSX_IO = { readWorkbook, buildWorkbook };
     return out;
   }
 
+  /* 某人在這些日子的兼課時段（絕對小時；依設定頁「兼課時段」，含排除日期、起訖日） */
+  function teachingSlots(ctx, p, days) {
+    const out = [];
+    for (const d of days) {
+      for (const t of (ctx.settings.teaching || [])) {
+        if (t.person !== p || !E.teachingOn(t, d)) continue;
+        let s = +t.from, e = +t.to; if (e <= s) e += 24;
+        out.push([hourIdx(d, s), hourIdx(d, e)]);
+      }
+    }
+    return out;
+  }
+
   /* 一個班的加班時段（未扣差假）：
      白天班：上班滿 9 小時之後；21 點後起班跨夜（起班 18 點以後）：隔日 06–09，以及隔日 09 點起滿 9 小時之後 */
   function otWindows(startIdx, endIdx) {
@@ -2356,7 +2369,8 @@ window.XLSX_IO = { readWorkbook, buildWorkbook };
         const sh = E.effShift(ctx, p, d);
         if (!sh) continue;
         const S = hourIdx(d, sh.s), En = hourIdx(d, sh.e);
-        const leaves = partialLeaves(ctx, p, [E.addDays(d, -1), d, E.addDays(d, 1)]);
+        const near = [E.addDays(d, -1), d, E.addDays(d, 1)];
+        const leaves = partialLeaves(ctx, p, near).map(([c, e]) => [c, e]).concat(teachingSlots(ctx, p, near));
         for (const [a, b] of otWindows(S, En)) {
           const cut = leaves.filter(([c, e]) => e > a && c < b).map(([c, e]) => [c, e]);
           const mine = hours[p] || {};
@@ -2369,12 +2383,16 @@ window.XLSX_IO = { readWorkbook, buildWorkbook };
   }
 
   /* 舊在班表（讀 PDF）的班 → 加班（沒有差假資料，依連續在班時段計算） */
-  function otFromBlock(startIdx, endIdx) {
-    return otWindows(startIdx, endIdx).map(([a, b]) => ({ start: a, hours: b - a }));
+  function otFromBlock(startIdx, endIdx, cuts) {
+    const out = [];
+    for (const [a, b] of otWindows(startIdx, endIdx)) {
+      for (const [x, y] of subtract(a, b, (cuts || []).filter(([c, e]) => e > a && c < b))) out.push({ start: x, hours: y - x });
+    }
+    return out;
   }
   function idxOfKey(k) { return hourIdx(k.slice(0, 10), +k.slice(11, 13)); }
 
-  const Core = { DUTY_NAME, DUTY_ORDER, dayIdx, hourIdx, isoOfIdx, keyOf, idxOfKey, daysBetween, codesIn, gridHours, gridShifts, subtract, otWindows, otFromRoster, otFromBlock, partialLeaves };
+  const Core = { teachingSlots, DUTY_NAME, DUTY_ORDER, dayIdx, hourIdx, isoOfIdx, keyOf, idxOfKey, daysBetween, codesIn, gridHours, gridShifts, subtract, otWindows, otFromRoster, otFromBlock, partialLeaves };
   if (typeof module !== 'undefined') module.exports = Core;
   root.Core = Core;
 })(typeof window !== 'undefined' ? window : globalThis);
@@ -2492,7 +2510,7 @@ function cfb(stream){
 }
 
 </script>
-<script>window.APP_VERSION = 'v1.3';
+<script>window.APP_VERSION = 'v1.4';
 window.App = { views: {}, hooks: [], ready: [] };
 </script>
 <script>/* 班表111 — 在班、加班、備份與舊資料搬移 */
@@ -2585,7 +2603,9 @@ window.App = { views: {}, hooks: [], ready: [] };
         const src = sourceOf(ownerDay(s.start));
         if (!src || src.kind !== 'legacy' || src.id !== id) continue;
         shifts.push(Object.assign({}, s, { name: nameOf(s.code), role: s.role || roleOf(s.code), src: 'legacy' }));
-        for (const o of C.otFromBlock(C.idxOfKey(s.start), C.idxOfKey(s.end))) ot.push({ code: s.code, name: nameOf(s.code), start: o.start, hours: o.hours });
+        const si = C.idxOfKey(s.start), ei = C.idxOfKey(s.end), d0 = C.isoOfIdx(si);
+        const cuts = C.teachingSlots({ settings: A.state.settings }, s.code, [E.addDays(d0, -1), d0, E.addDays(d0, 1)]);
+        for (const o of C.otFromBlock(si, ei, cuts)) ot.push({ code: s.code, name: nameOf(s.code), start: o.start, hours: o.hours });
       }
     }
     const seen = new Set();
