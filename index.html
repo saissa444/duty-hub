@@ -490,6 +490,7 @@ table.ot.mob .pick[aria-checked="true"]::after{left:8px;top:3px;width:6px;height
       </div>
     </div>
     <div class="otchg" id="otChg" hidden></div>
+    <div id="otSrc" hidden></div>
     <details class="ids" id="otIds">
       <summary>人員編號・要匯出的人</summary>
       <p class="sub" style="margin-top:8px">打勾且有填編號的人才會列在下方並匯出。編號會一直記住；清空後可按「填回」恢復上次的編號。</p>
@@ -2313,7 +2314,7 @@ function cfb(stream){
 }
 
 </script>
-<script>window.APP_VERSION = 'v1.0';
+<script>window.APP_VERSION = 'v1.1';
 window.App = { views: {}, hooks: [], ready: [] };
 </script>
 <script>/* 班表111 — 在班、加班、備份與舊資料搬移 */
@@ -2749,6 +2750,7 @@ window.App = { views: {}, hooks: [], ready: [] };
     }).join('') || '<span class="muted">先在「排班」頁匯入基準表並在「設定」填寫姓名</span>';
     if (!Object.values(otIds).some(v => (v || '').trim())) $id('otIds').open = true;
     renderChange();
+    renderOTSrc();
     renderOTTable();
     updUndo();
   }
@@ -2792,8 +2794,30 @@ window.App = { views: {}, hooks: [], ready: [] };
     $id('chgReset').onclick = () => resetMonth();
     $id('chgKeep').onclick = () => { otPushUndo(); otMeta[otMonth] = { base: ch.now }; writeJSON(K.otMeta, otMeta); renderOT(); updateNavDot(); A.toast('已維持目前資料', undoAction); };
   }
+  /* 這個月有哪些日子用的是舊在班表 PDF 的資料（排班修改不會影響） */
+  function legacyInMonth(month) {
+    const out = {};
+    data().days.filter(d => d.slice(0, 7).replace('-', '/') === month).forEach(d => {
+      const s = sourceOf(d); if (!s || s.kind !== 'legacy') return;
+      (out[s.id] = out[s.id] || []).push(d);
+    });
+    return Object.entries(out).map(([id, ds]) => ({ id, from: ds[0], to: ds[ds.length - 1], source: (legacy[id] || {}).source || '' }));
+  }
+  function renderOTSrc() {
+    const box = $id('otSrc'); const ls = legacyInMonth(otMonth);
+    const br = baseRange();
+    box.hidden = !ls.length;
+    if (!ls.length) { box.innerHTML = ''; return; }
+    const can = ls.filter(l => br && l.from <= br.last && l.to >= br.first);
+    const ranges = E.mdLabel(ls[0].from) + '–' + E.mdLabel(ls[ls.length - 1].to);
+    box.innerHTML = `<div class="srcnote"><span>${esc(ranges)} 的加班用的是舊在班表 PDF 的資料（${ls.length} 份），在「排班」頁修改這幾天不會反映在這裡。改用排班資料後，如果這個月有手動修改，會出現黃色提醒讓你確認差異。</span>${can.length ? `<button class="btn ghost sm" data-otsrc="${esc(can.map(l => l.id).join(','))}">這個月改用排班資料</button>` : ''}</div>`;
+  }
   function resetMonth() {
-    if (!otEdits[otMonth]) { A.toast('這個月沒有手動修改'); return; }
+    if (!otEdits[otMonth]) {
+      const ls = legacyInMonth(otMonth);
+      A.toast('這個月沒有手動修改，表格已經是依目前班表算出來的，排班一改就會自動更新。' + (ls.length ? `但 ${ls.map(l => E.mdLabel(l.from) + '–' + E.mdLabel(l.to)).join('、')} 用的是舊在班表 PDF 資料，見上方說明。` : ''));
+      return;
+    }
     otPushUndo(); otSel.clear(); otActiveB = null; delete otEdits[otMonth]; delete otMeta[otMonth];
     writeJSON(K.ot, otEdits); writeJSON(K.otMeta, otMeta); renderOT(); updateNavDot(); A.toast('已依班表重新計算', undoAction);
   }
@@ -2844,7 +2868,11 @@ window.App = { views: {}, hooks: [], ready: [] };
     dl.hidden = !nEd;
     dl.innerHTML = nEd ? `<summary>查看 ${nEd} 筆修改</summary><ul>${edList.map(d => `<li><b>${esc(d.who)}</b>　${esc(d.text)}</li>`).join('')}</ul>` : '';
     dl.open = wasOpen && !!nEd;
-    $id('otNote').textContent = (otEdits[otMonth] ? (nEd ? `這個月有 ${nEd} 筆手動修改；按「依班表重新計算」可還原。` : '這個月已手動修改過；按「依班表重新計算」可還原。') : '依班表自動計算。') + (missing ? ' 有幾筆沒有人員編號，請在上方「人員編號」填寫。' : '');
+    const shown = new Set(rows.map(r => r.name));
+    const hidden = [...new Set(otBase().map(r => r.name))].filter(n => !shown.has(n));
+    $id('otNote').textContent = (otEdits[otMonth] ? (nEd ? `這個月有 ${nEd} 筆手動修改；按「依班表重新計算」可還原。` : '這個月已手動修改過；按「依班表重新計算」可還原。') : '依目前班表自動計算，在「排班」頁修改會自動更新。') +
+      (hidden.length ? ` 另有 ${hidden.join('、')} 這個月也有加班，因為沒勾選或沒填人員編號，沒有列出（在上方「人員編號」勾選即可）。` : '') +
+      (missing ? ' 有幾筆沒有人員編號，請在上方「人員編號」填寫。' : '');
   }
   function otValidate(rows) {
     const bad = [];
@@ -3097,6 +3125,7 @@ window.App = { views: {}, hooks: [], ready: [] };
     $id('incAll').onclick = () => { data().people.forEach(p => { otInc[p.name] = true; }); writeJSON(K.idsInc, otInc); otSel.clear(); $id('idGrid').innerHTML = ''; renderOT(); };
     $id('incNone').onclick = () => { data().people.forEach(p => { otInc[p.name] = false; }); writeJSON(K.idsInc, otInc); otSel.clear(); $id('idGrid').innerHTML = ''; renderOT(); };
     $id('otReset').onclick = resetMonth;
+    $id('otSrc').addEventListener('click', e => { const s = e.target.closest('[data-otsrc]'); if (!s) return; s.dataset.otsrc.split(',').forEach(id => { if (legacy[id]) srcPref[id] = 'roster'; }); writeJSON(K.src, srcPref); lrev++; A.toast('這個月的在班與加班改用排班資料'); A.render(); });
     $id('otExport').onclick = otExport;
     document.addEventListener('keydown', e => {
       if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.key.toLowerCase() !== 'z' || $id('viewOT').hidden) return;
