@@ -5,7 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>班表111</title>
 <meta name="description" content="匯入勤務基準表排出每日勤務分配表，看在班關係並計算加班時數">
-<meta name="theme-color" content="#1f4e79">
+<meta name="theme-color" content="#ECE9E4" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#232527" media="(prefers-color-scheme: dark)">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="班表111">
@@ -15,7 +16,7 @@
 <meta property="og:title" content="班表111">
 <meta property="og:description" content="排班、在班關係、加班時數一次完成">
 <meta property="og:url" content="https://saissa444.github.io/duty-hub/">
-<meta property="og:image" content="https://saissa444.github.io/duty-hub/og-image.png?v=1">
+<meta property="og:image" content="https://saissa444.github.io/duty-hub/og-image.png?v=2">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image">
@@ -412,6 +413,174 @@ table.ot.mob .pick[aria-checked="true"]::after{left:8px;top:3px;width:6px;height
 .toast .tact{font:inherit;font-weight:700;background:none;border:0;color:#9cc7f0;padding:2px 4px;margin-left:10px;cursor:pointer;text-decoration:underline;text-underline-offset:3px;pointer-events:auto}
 .toast.hasact{pointer-events:auto}
 @media (max-width:420px){.otbar .brow{width:100%}}
+
+/* ===================== 班表111 — 莫蘭迪主題（統一風格） ===================== */
+:root{
+  --bg:#ECE9E4; --card:#F8F6F3; --ink:#45423F; --muted:#7A736B; --line:#DEDAD3; --line2:#E9E5DF;
+  --brand:#627A6C; --brand-ink:#FFFFFF; --accent:#DDE4DE; --warn:#9A6A3A; --warn-bg:#F3EADD; --err:#B5655A;
+  --manual:#F2E7D6; --manual-line:#C49A63; --lunch:#EEF1EA; --night:#ECEAF0; --chip:#E9E5DF;
+  --alt:#7A8794; --alt-ink:#FFFFFF; --seg:#E2DED7; --seg-on:#FBFAF8;
+  --radius:16px; --r-sm:10px;
+  --shadow:0 1px 2px rgba(69,66,63,.05),0 10px 24px -16px rgba(69,66,63,.35);
+  --shadow-hi:0 1px 2px rgba(69,66,63,.06),0 18px 34px -18px rgba(69,66,63,.45);
+  --mine:rgba(98,122,108,.13); --now:#B5655A;
+  --ease:cubic-bezier(.2,.7,.2,1); --spring:cubic-bezier(.34,1.3,.5,1);
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#232527; --card:#2C2F31; --ink:#E6E1DA; --muted:#A29B93; --line:#3B3F42; --line2:#313437;
+  --brand:#9FB3A6; --brand-ink:#1E2321; --accent:#34403A; --warn:#D9B07E; --warn-bg:#352E25; --err:#D98C7F;
+  --manual:#3A3226; --manual-line:#B38A55; --lunch:#2A302A; --night:#2A2A31; --chip:#363A3D;
+  --alt:#A9B4BF; --alt-ink:#1E2226; --seg:#1C1E20; --seg-on:#393D40;
+  --shadow:0 1px 2px rgba(0,0,0,.25),0 10px 24px -16px rgba(0,0,0,.6);
+  --shadow-hi:0 1px 2px rgba(0,0,0,.3),0 18px 34px -18px rgba(0,0,0,.7);
+  --mine:rgba(159,179,166,.14); --now:#D98C7F; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#232527; --card:#2C2F31; --ink:#E6E1DA; --muted:#A29B93; --line:#3B3F42; --line2:#313437;
+  --brand:#9FB3A6; --brand-ink:#1E2321; --accent:#34403A; --warn:#D9B07E; --warn-bg:#352E25; --err:#D98C7F;
+  --manual:#3A3226; --manual-line:#B38A55; --lunch:#2A302A; --night:#2A2A31; --chip:#363A3D;
+  --alt:#A9B4BF; --alt-ink:#1E2226; --seg:#1C1E20; --seg-on:#393D40;
+  --shadow:0 1px 2px rgba(0,0,0,.25),0 10px 24px -16px rgba(0,0,0,.6);
+  --shadow-hi:0 1px 2px rgba(0,0,0,.3),0 18px 34px -18px rgba(0,0,0,.7);
+  --mine:rgba(159,179,166,.14); --now:#D98C7F; color-scheme:dark}
+
+body{background:var(--bg);color:var(--ink);font-feature-settings:"palt" 0;-webkit-font-smoothing:antialiased}
+::selection{background:color-mix(in srgb,var(--brand) 25%,transparent)}
+
+/* ---------- 頁首：毛玻璃＋分段切換 ---------- */
+.top{background:color-mix(in srgb,var(--bg) 84%,transparent);-webkit-backdrop-filter:saturate(1.3) blur(16px);backdrop-filter:saturate(1.3) blur(16px);color:var(--ink);box-shadow:0 1px 0 color-mix(in srgb,var(--line) 70%,transparent);padding-top:calc(10px + env(safe-area-inset-top));padding-bottom:10px}
+.top h1{font-size:18px;font-weight:700;letter-spacing:.06em;color:var(--ink);display:flex;align-items:center;gap:8px}
+.top h1::before{content:"";width:10px;height:10px;border-radius:3px;background:var(--brand);box-shadow:12px 0 0 var(--manual-line);margin-right:12px;flex:none}
+.navtabs{position:relative;background:var(--seg);border-radius:12px;padding:3px;gap:2px;box-shadow:inset 0 1px 2px rgba(69,66,63,.08)}
+.navind{position:absolute;top:3px;bottom:3px;left:0;width:0;border-radius:9px;background:var(--seg-on);box-shadow:0 1px 2px rgba(69,66,63,.12),0 4px 10px -6px rgba(69,66,63,.35);transition:transform .38s var(--spring),width .38s var(--spring);pointer-events:none}
+.navtab{border:0;background:transparent;color:var(--muted);border-radius:9px;padding:6px 14px;min-height:34px;font-weight:600;z-index:1;transition:color .25s var(--ease)}
+.navtab[aria-selected="true"]{background:transparent;color:var(--ink);border-color:transparent}
+.navtab:hover{color:var(--ink)}
+.navtab:focus-visible{outline:2px solid var(--brand);outline-offset:1px}
+.navtab .ndot{border-color:var(--seg);background:var(--warn)}
+.no-ind .navtab[aria-selected="true"]{background:var(--seg-on)}
+@media (max-width:420px){.top h1{font-size:16px;letter-spacing:.08em}.top h1::before{display:none}.navtab{padding:6px 10px}}
+
+.banner{background:var(--warn-bg);color:var(--warn);border-radius:0}
+main{padding-top:16px}
+
+/* ---------- 卡片、標題 ---------- */
+.card,.btoday,.bday,.ids,.tablewrap,.otsum .pill{border-color:transparent;border-radius:var(--radius);box-shadow:var(--shadow);background:var(--card)}
+.card{padding:16px}
+.card h3{font-size:15.5px;letter-spacing:.04em;font-weight:700}
+.card h3 small{letter-spacing:0}
+.bday{transition:box-shadow .3s var(--ease),transform .3s var(--ease)}
+@media (hover:hover){.bday:hover{box-shadow:var(--shadow-hi)}}
+.bday.is-today{box-shadow:0 0 0 1.5px var(--brand),var(--shadow)}
+
+/* ---------- 按鈕 ---------- */
+.btn{border-radius:var(--r-sm);border-color:var(--line);background:var(--card);transition:background-color .2s var(--ease),border-color .2s var(--ease),box-shadow .2s var(--ease),transform .12s var(--ease),filter .2s}
+.btn:active{transform:scale(.97)}
+@media (hover:hover){.btn:hover{border-color:color-mix(in srgb,var(--brand) 55%,var(--line))}}
+.btn.primary{background:var(--brand);border-color:var(--brand);color:var(--brand-ink);box-shadow:0 8px 18px -12px var(--brand)}
+@media (hover:hover){.btn.primary:hover{filter:brightness(1.05)}}
+.btn.primary.alt{background:var(--alt);border-color:var(--alt);color:var(--alt-ink);box-shadow:0 8px 18px -12px var(--alt)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .btn.primary.alt{background:var(--alt);border-color:var(--alt)}}
+.btn.ghost{background:transparent}
+.btn.danger{color:var(--err);border-color:color-mix(in srgb,var(--err) 50%,var(--line))}
+.btn:disabled{opacity:.45}
+.btn:focus-visible,.chip:focus-visible,.daytab:focus-visible,.pchip:focus-visible,.shiftbtn:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+.link{color:var(--brand);text-underline-offset:3px}
+
+/* ---------- 表單 ---------- */
+select,input,textarea{border-color:var(--line);background:var(--card);border-radius:var(--r-sm);transition:border-color .2s var(--ease),box-shadow .2s var(--ease)}
+select:focus,input:focus,textarea:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px color-mix(in srgb,var(--brand) 18%,transparent)}
+input[type=checkbox],input[type=radio]{accent-color:var(--brand)}
+
+/* ---------- 週次、日分頁 ---------- */
+.daytabs{background:color-mix(in srgb,var(--bg) 88%,transparent);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);gap:6px;padding:6px 0}
+.daytab{border-color:transparent;background:var(--card);border-radius:12px;box-shadow:0 1px 2px rgba(69,66,63,.06);transition:background-color .25s var(--ease),color .25s var(--ease),box-shadow .25s var(--ease),transform .12s var(--ease)}
+.daytab:active{transform:scale(.95)}
+.daytab.on{background:var(--brand);color:var(--brand-ink);box-shadow:0 8px 16px -10px var(--brand)}
+.dot.warn{background:var(--warn)} .dot.edit{background:var(--manual-line)}
+.weekinfo .badge,.badge{background:var(--accent);color:var(--brand)}
+.dayhead h2{font-size:19px;letter-spacing:.04em}
+
+/* ---------- 當日班別 ---------- */
+.srow{border-color:var(--line2);border-radius:12px;background:var(--card);transition:border-color .2s var(--ease),background-color .2s var(--ease)}
+.srow.changed{border-color:var(--manual-line);background:var(--manual)}
+.who b{background:var(--chip);border-radius:7px}
+.who .star{color:var(--manual-line)}
+.shiftbtn{border-color:var(--line);border-radius:10px;transition:border-color .2s var(--ease),background-color .2s var(--ease)}
+@media (hover:hover){.shiftbtn:hover{border-color:var(--brand)}}
+.shiftbtn em{color:var(--warn)}
+.starrow{background:var(--line2);border-radius:12px;padding:8px 10px}
+.starrow b{color:var(--ink)}
+
+/* ---------- 訊息、提醒 ---------- */
+.warnbox,.msgs li.w{background:var(--warn-bg);color:var(--warn);border-radius:12px}
+.msgs li.i,.srcnote{background:var(--accent);color:var(--ink);border-radius:12px}
+.otchg{border-radius:var(--radius);border-color:color-mix(in srgb,var(--warn) 55%,transparent)}
+
+/* ---------- 勤務分配表預覽 ---------- */
+.gridwrap{border-radius:12px;box-shadow:0 0 0 1px var(--line)}
+table.grid th,table.grid td{border-color:var(--line)}
+table.grid thead th,table.grid tbody th{background:var(--line2);color:var(--ink)}
+table.grid td.c{transition:background-color .15s var(--ease)}
+table.grid td.c:hover{outline:2px solid var(--brand)}
+pre.footer{background:var(--line2);border-radius:10px}
+
+/* ---------- 晶片、標籤 ---------- */
+.chip{background:var(--chip);border-color:transparent;transition:background-color .2s var(--ease),color .2s var(--ease),transform .12s var(--spring)}
+.chip:active{transform:scale(.92)}
+.chip.on{background:var(--brand);color:var(--brand-ink);box-shadow:0 6px 14px -8px var(--brand)}
+.tag{background:var(--chip)}
+.pchip{transition:border-color .2s var(--ease),box-shadow .2s var(--ease),background-color .2s var(--ease),transform .12s var(--spring)}
+.pchip:active{transform:scale(.95)}
+
+/* ---------- 視窗（底部抽屜）與提示 ---------- */
+.modal{background:rgba(35,37,39,.38);-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px)}
+.sheet{background:var(--card);border-radius:22px 22px 0 0;box-shadow:0 -18px 40px -20px rgba(0,0,0,.45)}
+.sheet::before{content:"";display:block;width:38px;height:5px;border-radius:3px;background:var(--line);margin:-6px auto 12px}
+@media (min-width:700px){.sheet{border-radius:22px}.sheet::before{display:none}}
+.toast{background:#45423F;color:#F8F6F3;border-radius:14px;box-shadow:0 14px 30px -14px rgba(0,0,0,.5)}
+.toast.err{background:var(--err);color:#fff}
+.toast .tact{color:#C9D7CD}
+
+/* ---------- 在班與加班的小細節 ---------- */
+.bar{box-shadow:inset 0 1px 0 rgba(255,255,255,.2)}
+.tbadge{background:var(--brand);color:var(--brand-ink)}
+.bulk{border-radius:var(--radius)}
+.bulk:not(.idle){border-color:var(--brand)}
+.otcard{border-color:transparent;box-shadow:0 1px 2px rgba(69,66,63,.06)}
+.fab{background:var(--brand);color:var(--brand-ink)}
+.restore{border-radius:8px}
+.migr .item{border-color:var(--line);border-radius:12px;background:var(--bg)}
+.bkstats div{background:var(--bg);border-radius:12px}
+.ver{letter-spacing:.08em}
+
+/* ---------- 動畫（減少動態效果時全部關閉） ---------- */
+@media (prefers-reduced-motion:no-preference){
+  @keyframes v-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+  @keyframes v-rise{from{opacity:0;transform:translateY(12px) scale(.99)}to{opacity:1;transform:none}}
+  @keyframes v-fade{from{opacity:0}to{opacity:1}}
+  @keyframes v-sheet{from{transform:translateY(32px);opacity:.4}to{transform:none;opacity:1}}
+  @keyframes v-pop{from{opacity:0;transform:scale(.96)}to{opacity:1;transform:none}}
+  @keyframes v-drop{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
+  @keyframes v-pulse{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--warn) 55%,transparent)}100%{box-shadow:0 0 0 7px transparent}}
+  main.v-enter>*,main.v-enter .bview>*{animation:v-rise .5s var(--ease) both}
+  main.v-enter>*:nth-child(2),main.v-enter .bview>*:nth-child(2){animation-delay:50ms}
+  main.v-enter>*:nth-child(3),main.v-enter .bview>*:nth-child(3){animation-delay:100ms}
+  main.v-enter>*:nth-child(4),main.v-enter .bview>*:nth-child(4){animation-delay:150ms}
+  main.v-enter>*:nth-child(n+5),main.v-enter .bview>*:nth-child(n+5){animation-delay:200ms}
+  #dayPanel.d-enter>*{animation:v-in .42s var(--ease) both}
+  #dayPanel.d-enter>*:nth-child(2){animation-delay:40ms}
+  #dayPanel.d-enter>*:nth-child(3){animation-delay:80ms}
+  #dayPanel.d-enter>*:nth-child(n+4){animation-delay:120ms}
+  .modal.open{animation:v-fade .22s var(--ease)}
+  .modal.open .sheet{animation:v-sheet .38s var(--spring)}
+  @media (min-width:700px){.modal.open .sheet{animation:v-pop .3s var(--spring)}}
+  .otchg:not([hidden]),.srcnote,.warnbox{animation:v-drop .35s var(--ease)}
+  .navtab .ndot{animation:v-pulse 1.8s ease-out 3}
+  table.grid td.c.flashcell{animation:v-pop .5s var(--spring)}
+  .srow.changed{animation:v-fade .3s var(--ease)}
+}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{transition-duration:.01ms!important;animation-duration:.01ms!important}}
 </style>
 </head>
 <body>
@@ -2323,7 +2492,7 @@ function cfb(stream){
 }
 
 </script>
-<script>window.APP_VERSION = 'v1.2';
+<script>window.APP_VERSION = 'v1.3';
 window.App = { views: {}, hooks: [], ready: [] };
 </script>
 <script>/* 班表111 — 在班、加班、備份與舊資料搬移 */
@@ -3531,13 +3700,36 @@ window.App = { views: {}, hooks: [], ready: [] };
     if (!VIEWS[state.ui.view]) state.ui.view = 'roster';
     Object.keys(VIEWS).forEach(v => { $('#' + VIEWS[v]).hidden = state.ui.view !== v; });
     document.querySelectorAll('.navtab').forEach(b => b.setAttribute('aria-selected', String(b.dataset.view === state.ui.view)));
+    placeNavInd();
     if (!storageOK) $('#storageWarn').hidden = false;
     if (state.ui.view === 'settings') renderSettings();
     else if (state.ui.view === 'roster') renderRoster();
     else if (App.views[state.ui.view]) App.views[state.ui.view].render();
     App.hooks.forEach(f => { try { f(state.ui.view); } catch (e) { console.warn(e); } });
   }
-  function setView(v) { if (state.ui.view === v) return; state.ui.view = v; save(); render(); window.scrollTo(0, 0); }
+  /* 分頁指示器（滑動的白色底） */
+  function placeNavInd() {
+    const nav = document.querySelector('.navtabs'); if (!nav) return;
+    let ind = nav.querySelector('.navind');
+    if (!ind) { ind = document.createElement('span'); ind.className = 'navind'; ind.setAttribute('aria-hidden', 'true'); nav.prepend(ind); }
+    const on = nav.querySelector('.navtab[aria-selected="true"]'); if (!on) return;
+    ind.style.width = on.offsetWidth + 'px';
+    ind.style.transform = `translateX(${on.offsetLeft}px)`;
+  }
+  window.addEventListener('resize', placeNavInd);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(placeNavInd);
+  /* 換頁、換日時的進場動畫（只在切換時播放，修改資料重畫時不播） */
+  function enterAnim(el, cls) {
+    if (!el || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    el.classList.remove(cls); void el.offsetWidth; el.classList.add(cls);
+    clearTimeout(el._animT); el._animT = setTimeout(() => el.classList.remove(cls), 900);
+  }
+  let animDay = false;
+  function setView(v) {
+    if (state.ui.view === v) return;
+    state.ui.view = v; save(); render(); window.scrollTo(0, 0);
+    enterAnim($('#' + VIEWS[v]), 'v-enter');
+  }
 
   function renderRoster() {
     const b = state.base;
@@ -3609,6 +3801,7 @@ window.App = { views: {}, hooks: [], ready: [] };
         <div class="gridwrap">${leaveHtml(r)}</div>
         <pre class="footer">${esc(r.final.E63)}</pre>
       </section>`;
+    if (animDay) { animDay = false; enterAnim($('#dayPanel'), 'd-enter'); }
   }
 
   // 「基準表原本排法」：拿掉當天與隔天的個別修改（差假、班別、手動格子）重算，用來比對哪些格子變了
@@ -3947,7 +4140,7 @@ window.App = { views: {}, hooks: [], ready: [] };
   /* ---------- 事件 ---------- */
   function bind() {
     $('#fileBase').addEventListener('change', e => { importBase(e.target.files[0]); e.target.value = ''; });
-    $('#weekSel').addEventListener('change', e => { state.ui.week = e.target.value; save(); render(); });
+    $('#weekSel').addEventListener('change', e => { state.ui.week = e.target.value; animDay = true; save(); render(); });
     $('#btnExport').addEventListener('click', () => exportWeek('xlsx'));
     $('#btnExportPdf').addEventListener('click', () => exportWeek('pdf'));
     $('#btnDuplexXlsx').addEventListener('click', () => exportWeek('xlsx', true));
@@ -3959,7 +4152,7 @@ window.App = { views: {}, hooks: [], ready: [] };
       const t = e.target.closest('[data-day],[data-cell],[data-shift],[data-delleave],[data-skipfixed],[data-srcswitch],#btnStar,#btnAddLeave,#btnClearDay,#btnClearWeek,#btnPrevWeek,#btnNextWeek,#btnGoSettings');
       if (t && t.id === 'btnGoSettings') { setView('settings'); return; }
       if (!t) return;
-      if (t.dataset.day !== undefined) { state.ui.day = +t.dataset.day; save(); render(); return; }
+      if (t.dataset.day !== undefined) { if (state.ui.day !== +t.dataset.day) animDay = true; state.ui.day = +t.dataset.day; save(); render(); return; }
       if (t.dataset.cell) { editCell(t.dataset.cell); return; }
       if (t.dataset.shift) { editShift(t.dataset.shift); return; }
       const w = currentWeek(); const iso = w ? E.weekDays(w)[state.ui.day] : null;
@@ -3972,7 +4165,7 @@ window.App = { views: {}, hooks: [], ready: [] };
       if (t.id === 'btnClearWeek') { confirmBox('清除本週 7 天所有的班別修改、差假與手動格子？', '清除', () => { E.weekDays(w).forEach(d => delete state.edits[d]); save(); render(); }); return; }
       if (t.id === 'btnPrevWeek' || t.id === 'btnNextWeek') {
         const i = state.base.weeks.findIndex(x => x.sunday === w.sunday) + (t.id === 'btnPrevWeek' ? -1 : 1);
-        if (i >= 0 && i < state.base.weeks.length) { state.ui.week = state.base.weeks[i].sunday; save(); render(); }
+        if (i >= 0 && i < state.base.weeks.length) { state.ui.week = state.base.weeks[i].sunday; animDay = true; save(); render(); }
       }
     });
     // 設定
