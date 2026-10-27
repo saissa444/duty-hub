@@ -581,6 +581,17 @@ pre.footer{background:var(--line2);border-radius:10px}
   .srow.changed{animation:v-fade .3s var(--ease)}
 }
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{transition-duration:.01ms!important;animation-duration:.01ms!important}}
+
+/* 週次選單：用可換行的標籤顯示目前週次，原生 select 疊在上面（透明）保留系統選單 */
+.weekpick{position:relative;flex:1;min-width:0}
+.weeklabel{display:flex;align-items:center;flex-wrap:wrap;gap:2px 8px;min-height:40px;padding:7px 30px 7px 12px;border:1px solid var(--line);border-radius:var(--r-sm);background:var(--card);color:var(--ink);font-size:16px;line-height:1.35;position:relative;transition:border-color .2s var(--ease),box-shadow .2s var(--ease)}
+.weeklabel::after{content:"";position:absolute;right:12px;top:50%;width:7px;height:7px;border-right:1.6px solid var(--muted,#888);border-bottom:1.6px solid var(--muted,#888);transform:translateY(-70%) rotate(45deg)}
+.weeklabel>*,.weeklabel .wl-date>span{white-space:nowrap}
+.weeklabel .wl-date{display:inline-flex;flex-wrap:wrap;white-space:normal}
+.weeklabel .wl-tag{font-weight:650}
+.weeklabel .wl-star{color:var(--brand);font-weight:600;font-variant-numeric:tabular-nums}
+.weekpick select{position:absolute;inset:0;width:100%;height:100%;opacity:0;margin:0;cursor:pointer;-webkit-appearance:none;appearance:none}
+.weekpick:focus-within .weeklabel{border-color:var(--brand);box-shadow:0 0 0 3px color-mix(in srgb,var(--brand) 18%,transparent)}
 </style>
 </head>
 <body>
@@ -608,7 +619,7 @@ pre.footer{background:var(--line2);border-radius:10px}
       <h3>2．選擇週次</h3>
       <div class="weekrow">
         <button class="btn ghost sq" id="btnPrevWeek" aria-label="上一週">‹</button>
-        <select id="weekSel"></select>
+        <div class="weekpick"><span class="weeklabel" id="weekLabel" aria-hidden="true"></span><select id="weekSel" aria-label="選擇週次"></select></div>
         <button class="btn ghost sq" id="btnNextWeek" aria-label="下一週">›</button>
       </div>
       <div class="weekinfo" id="weekInfo"></div>
@@ -2510,7 +2521,7 @@ function cfb(stream){
 }
 
 </script>
-<script>window.APP_VERSION = 'v1.4';
+<script>window.APP_VERSION = 'v1.5';
 window.App = { views: {}, hooks: [], ready: [] };
 </script>
 <script>/* 班表111 — 在班、加班、備份與舊資料搬移 */
@@ -3769,6 +3780,9 @@ window.App = { views: {}, hooks: [], ready: [] };
       const end = E.addDays(x.sunday, 6);
       return `<option value="${x.sunday}"${x.sunday === w.sunday ? ' selected' : ''}>${esc(x.label ? x.label + '　' : '')}${E.mdLabel(x.sunday)}(日)–${E.mdLabel(end)}(六)　★${x.star || '?'}</option>`;
     }).join('');
+    { const end = E.addDays(w.sunday, 6), lb = b.weeks.find(x => x.sunday === w.sunday) || w;
+      $('#weekLabel').innerHTML = (lb.label ? `<b class="wl-tag">${esc(lb.label)}</b>` : '') +
+        `<span class="wl-date"><span>${E.mdLabel(w.sunday)}(日)–</span><span>${E.mdLabel(end)}(六)</span></span><span class="wl-star">★${lb.star || '?'}</span>`; }
     const days = E.weekDays(w);
     const c = ctx();
     const results = days.map(iso => E.computeDay(c, iso));
