@@ -519,7 +519,7 @@ table.ot.mob .pick[aria-checked="true"]::after{left:8px;top:3px;width:6px;height
     </table></div>
     <p class="sub" id="otNote"></p>
     <details class="bkdiff" id="otDiffList" hidden></details>
-    <p class="sub">計算方式：依實際班別（含班別修改）計算。白天班上班滿 9 小時之後算加班（例：09–21 → 18:00 起 3 小時）。18 點以後起班跨夜者，隔日 06:00–09:00 算加班；09:00 後繼續上班，超過 9 小時的部分也算。加班時段內登錄的差假（補休、休假、公假、事假等）會扣掉，例如 09–21 請 12–19，只算 19–21 共 2 小時。週六、週日標為「假日加班」，國定假日請手動改類別。</p>
+    <p class="sub">計算方式：依實際班別（含班別修改）計算。白天班上班滿 9 小時之後算加班（例：09–21 → 18:00 起 3 小時）。18 點以後起班跨夜者，隔日 06:00–09:00 算加班；09:00 後繼續上班，超過 9 小時的部分也算。加班時段內登錄的差假（補休、休假、公假、事假等），以及在勤務分配表上把這個人的格子清空的時段，都會扣掉，例如 09–21 請 12–19，只算 19–21 共 2 小時。週六、週日標為「假日加班」，國定假日請手動改類別。</p>
   </div>
 </main>
 
@@ -2084,10 +2084,9 @@ window.XLSX_IO = { readWorkbook, buildWorkbook };
   }
 
   /* 依勤務分配表格子（含手動修改）算出每人連續在班的時段，格式與在班表讀 PDF 的結果相同 */
-  function gridShifts(ctx, firstIso, lastIso) {
+  /* 每人每小時出現在勤務分配表哪些勤務欄（含手動修改）：{代號: {絕對小時: [勤務名稱]}} */
+  function gridHours(ctx, firstIso, lastIso) {
     const hours = {};
-    const people = {};
-    (ctx.settings.persons || []).forEach(p => { people[p.code] = p; });
     for (const d of daysBetween(E.addDays(firstIso, -1), lastIso)) {
       const r = E.computeDay(ctx, d);
       for (let k = 0; k < E.SLOT_COUNT; k++) {
@@ -2101,6 +2100,13 @@ window.XLSX_IO = { readWorkbook, buildWorkbook };
         }
       }
     }
+    return hours;
+  }
+
+  function gridShifts(ctx, firstIso, lastIso, hoursIn) {
+    const hours = hoursIn || gridHours(ctx, firstIso, lastIso);
+    const people = {};
+    (ctx.settings.persons || []).forEach(p => { people[p.code] = p; });
     const lo = hourIdx(firstIso, 0), hi = hourIdx(E.addDays(lastIso, 1), 9);
     const shifts = [];
     Object.keys(hours).forEach(code => {
@@ -2172,9 +2178,10 @@ window.XLSX_IO = { readWorkbook, buildWorkbook };
     return endIdx > startIdx + 9 ? [[startIdx + 9, endIdx]] : [];
   }
 
-  /* 依實際班別（含班別修改、整天差假）算加班，扣掉部分時段差假 */
-  function otFromRoster(ctx, firstIso, lastIso) {
+  /* 依實際班別（含班別修改、整天差假）算加班時段，再扣掉：部分時段差假，以及勤務分配表上這個人沒有任何勤務的小時（例如手動把格子清空） */
+  function otFromRoster(ctx, firstIso, lastIso, hoursIn) {
     const out = [];
+    const hours = hoursIn || gridHours(ctx, E.addDays(firstIso, -1), E.addDays(lastIso, 1));
     for (const d of daysBetween(firstIso, lastIso)) {
       for (const p of E.PERSONS) {
         const sh = E.effShift(ctx, p, d);
@@ -2182,7 +2189,9 @@ window.XLSX_IO = { readWorkbook, buildWorkbook };
         const S = hourIdx(d, sh.s), En = hourIdx(d, sh.e);
         const leaves = partialLeaves(ctx, p, [E.addDays(d, -1), d, E.addDays(d, 1)]);
         for (const [a, b] of otWindows(S, En)) {
-          const cut = leaves.filter(([c, e]) => e > a && c < b);
+          const cut = leaves.filter(([c, e]) => e > a && c < b).map(([c, e]) => [c, e]);
+          const mine = hours[p] || {};
+          for (let t = a; t < b; t++) if (!mine[t] || !mine[t].length) cut.push([t, t + 1]);
           for (const [x, y] of subtract(a, b, cut)) out.push({ code: p, start: x, hours: y - x, shift: { s: S, e: En, code: sh.code }, cut: cut.length > 0 });
         }
       }
@@ -2196,7 +2205,7 @@ window.XLSX_IO = { readWorkbook, buildWorkbook };
   }
   function idxOfKey(k) { return hourIdx(k.slice(0, 10), +k.slice(11, 13)); }
 
-  const Core = { DUTY_NAME, DUTY_ORDER, dayIdx, hourIdx, isoOfIdx, keyOf, idxOfKey, daysBetween, codesIn, gridShifts, subtract, otWindows, otFromRoster, otFromBlock, partialLeaves };
+  const Core = { DUTY_NAME, DUTY_ORDER, dayIdx, hourIdx, isoOfIdx, keyOf, idxOfKey, daysBetween, codesIn, gridHours, gridShifts, subtract, otWindows, otFromRoster, otFromBlock, partialLeaves };
   if (typeof module !== 'undefined') module.exports = Core;
   root.Core = Core;
 })(typeof window !== 'undefined' ? window : globalThis);
@@ -2314,7 +2323,7 @@ function cfb(stream){
 }
 
 </script>
-<script>window.APP_VERSION = 'v1.1';
+<script>window.APP_VERSION = 'v1.2';
 window.App = { views: {}, hooks: [], ready: [] };
 </script>
 <script>/* 班表111 — 在班、加班、備份與舊資料搬移 */
@@ -2392,11 +2401,12 @@ window.App = { views: {}, hooks: [], ready: [] };
     const br = baseRange();
     if (br) {
       const ctx = A.ctx();
-      for (const s of C.gridShifts(ctx, br.first, br.last)) {
+      const hours = C.gridHours(ctx, E.addDays(br.first, -1), br.last);
+      for (const s of C.gridShifts(ctx, br.first, br.last, hours)) {
         const src = sourceOf(ownerDay(s.start));
         if (src && src.kind === 'roster') shifts.push(Object.assign({}, s, { name: nameOf(s.code), role: roleOf(s.code), src: 'roster' }));
       }
-      for (const r of C.otFromRoster(ctx, br.first, br.last)) {
+      for (const r of C.otFromRoster(ctx, br.first, br.last, hours)) {
         const src = sourceOf(C.isoOfIdx(r.shift.s - 8));
         if (src && src.kind === 'roster') ot.push({ code: r.code, name: nameOf(r.code), start: r.start, hours: r.hours });
       }
