@@ -1241,9 +1241,10 @@ function computeDay(ctx, iso) {
     if (partial.some(x => x.p === p && H >= x.a && H < x.b)) return null;
     return seg;
   }
+  /* 這個小時正在兼課（不論是哪一天起班的班：例如週四 3 號班跨夜到週五 08-09，而週五 08-12 兼課，也算兼課 → 機動待命） */
   function teaching(p, H, seg) {
-    if (!seg || isNightShift(seg.sh)) return false;
-    return teach.some(x => x.p === p && H >= x.a && H < x.b && x.day === seg.day);
+    if (!seg) return false;
+    return teach.some(x => x.p === p && H >= x.a && H < x.b);
   }
   // 某人「當天完全沒班」：當天起班的班別不存在（或全天差假）
   function hasDayShift(p, d) { return !!effShift(ctx, p, d); }
@@ -1328,7 +1329,7 @@ function computeDay(ctx, iso) {
   Object.keys(put).forEach(a => { cells[a] = joinCodes(put[a]); });
 
   // 值星留空提醒（合併連續時段）
-  groupSlots(dutyEmpty).forEach(([a, b]) => warnings.push(`${slotLabel(a).slice(0, 2)}-${slotLabel(b).slice(3)} 值星沒有人可以排，已留空。`));
+  groupSlots(dutyEmpty).forEach(([a, b]) => warnings.push(`${8 + a >= 24 ? '隔日 ' : ''}${slotLabel(a).slice(0, 2)}-${slotLabel(b).slice(3)} 值星沒有人可以排，已留空。`));
   // 兼課代理說明合併
   const infoMerged = mergeInfo(info);
 
@@ -2544,7 +2545,7 @@ function cfb(stream){
 }
 
 </script>
-<script>window.APP_VERSION = 'v1.6';
+<script>window.APP_VERSION = 'v1.7';
 window.App = { views: {}, hooks: [], ready: [] };
 </script>
 <script>/* 班表111 — 在班、加班、備份與舊資料搬移 */
