@@ -1,7 +1,7 @@
 // 班表111：離線快取。有網路時一律拿最新版並更新快取，沒網路時用快取。
 // 注意：同一網域（saissa444.github.io）的其他舊 App 更新時可能清掉這裡的快取，
 // 所以每次開啟 App 都會檢查並補回。
-const CACHE = 'duty-hub-v8';   // 每次更新要和 index.html 的 APP_VERSION 一起改
+const CACHE = 'duty-hub-v9';   // 每次更新要和 index.html 的 APP_VERSION 一起改
 const FILES = ['./', './index.html', './manifest.webmanifest', './icon-180.png', './icon-192.png', './icon-512.png', './icon-maskable-512.png'];
 const fill = () => caches.open(CACHE).then(c => c.addAll(FILES.map(f => new Request(f, { cache: 'reload' }))));
 self.addEventListener('install', e => { e.waitUntil(fill().then(() => self.skipWaiting())); });

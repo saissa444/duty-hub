@@ -592,6 +592,20 @@ pre.footer{background:var(--line2);border-radius:10px}
 .weeklabel .wl-star{color:var(--brand);font-weight:600;font-variant-numeric:tabular-nums}
 .weekpick select{position:absolute;inset:0;width:100%;height:100%;opacity:0;margin:0;cursor:pointer;-webkit-appearance:none;appearance:none}
 .weekpick:focus-within .weeklabel{border-color:var(--brand);box-shadow:0 0 0 3px color-mix(in srgb,var(--brand) 18%,transparent)}
+
+/* 浮動週次列：與日期分頁一起固定在頂端；出現時用負的下邊距抵銷高度，內容不會往下跳 */
+.stick-sentinel{height:0}
+.stickhead{position:sticky;top:var(--hdr);z-index:10;margin:0 0 12px;background:color-mix(in srgb,var(--bg) 94%,transparent);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);transition:margin-bottom .28s var(--ease)}
+.stickhead .daytabs{position:static;top:auto;margin:0;background:none;-webkit-backdrop-filter:none;backdrop-filter:none}
+.miniweek{display:flex;gap:8px;align-items:center;height:0;opacity:0;overflow:hidden;padding:0;transform:translateY(-6px);transition:height .28s var(--ease),opacity .2s var(--ease),transform .28s var(--ease),padding .28s var(--ease);visibility:hidden}
+.stickhead.show{margin-bottom:-38px}
+.stickhead.show .miniweek{height:50px;padding:6px 0 4px;opacity:1;transform:none;visibility:visible}
+.miniweek .btn.sq{min-height:38px;height:38px;width:38px;padding:0}
+.miniweek .weeklabel{min-height:38px;padding:4px 30px 4px 12px;font-size:15px;flex-wrap:nowrap;overflow:hidden}
+.miniweek .weeklabel>*{flex:none}
+.miniweek .weeklabel .wl-date{flex-wrap:nowrap}
+.btn.sq:disabled{opacity:.35;cursor:default}
+@media (max-width:340px){.miniweek .weeklabel{font-size:13px;gap:2px 5px;padding-right:24px}.miniweek .weeklabel::after{right:9px}}
 </style>
 </head>
 <body>
@@ -628,7 +642,15 @@ pre.footer{background:var(--line2);border-radius:10px}
       <p class="exlabel">列印用<small>雙面列印：正面勤務分配表、背面勤務變更表，共 14 頁</small></p>
       <div class="exportrow"><button class="btn primary alt" id="btnDuplexXlsx">列印用匯出 Excel</button><button class="btn primary alt" id="btnDuplexPdf">列印用匯出 PDF</button></div>
     </section>
-    <nav class="daytabs" id="dayTabs"></nav>
+    <div class="stick-sentinel" id="stickSentinel" aria-hidden="true"></div>
+    <div class="stickhead" id="stickHead">
+      <div class="miniweek" id="miniWeek" aria-hidden="true">
+        <button class="btn ghost sq" data-wk="-1" aria-label="上一週" tabindex="-1">‹</button>
+        <div class="weekpick"><span class="weeklabel" id="weekLabel2" aria-hidden="true"></span><select id="weekSel2" aria-label="選擇週次" tabindex="-1"></select></div>
+        <button class="btn ghost sq" data-wk="1" aria-label="下一週" tabindex="-1">›</button>
+      </div>
+      <nav class="daytabs" id="dayTabs"></nav>
+    </div>
     <div id="dayPanel"></div>
   </div>
 </main>
@@ -2545,7 +2567,7 @@ function cfb(stream){
 }
 
 </script>
-<script>window.APP_VERSION = 'v1.7';
+<script>window.APP_VERSION = 'v1.8';
 window.App = { views: {}, hooks: [], ready: [] };
 </script>
 <script>/* 班表111 — 在班、加班、備份與舊資料搬移 */
@@ -3761,6 +3783,7 @@ window.App = { views: {}, hooks: [], ready: [] };
     else if (state.ui.view === 'roster') renderRoster();
     else if (App.views[state.ui.view]) App.views[state.ui.view].render();
     App.hooks.forEach(f => { try { f(state.ui.view); } catch (e) { console.warn(e); } });
+    if (App.updMiniWeek) App.updMiniWeek();
   }
   /* 分頁指示器（滑動的白色底） */
   function placeNavInd() {
@@ -3807,6 +3830,13 @@ window.App = { views: {}, hooks: [], ready: [] };
     { const end = E.addDays(w.sunday, 6), lb = b.weeks.find(x => x.sunday === w.sunday) || w;
       $('#weekLabel').innerHTML = (lb.label ? `<b class="wl-tag">${esc(lb.label)}</b>` : '') +
         `<span class="wl-date"><span>${E.mdLabel(w.sunday)}(日)–</span><span>${E.mdLabel(end)}(六)</span></span><span class="wl-star">★${lb.star || '?'}</span>`; }
+    { const lb = b.weeks.find(x => x.sunday === w.sunday) || w, end = E.addDays(w.sunday, 6);
+      $('#weekSel2').innerHTML = $('#weekSel').innerHTML; $('#weekSel2').value = w.sunday;
+      $('#weekLabel2').innerHTML = (lb.label ? `<b class="wl-tag">${esc(lb.label)}</b>` : '') +
+        `<span class="wl-date"><span>${E.mdLabel(w.sunday)}–</span><span>${E.mdLabel(end)}</span></span><span class="wl-star">★${lb.star || '?'}</span>`;
+      const wi = b.weeks.findIndex(x => x.sunday === w.sunday);
+      document.querySelectorAll('#btnPrevWeek,[data-wk="-1"]').forEach(x => { x.disabled = wi <= 0; });
+      document.querySelectorAll('#btnNextWeek,[data-wk="1"]').forEach(x => { x.disabled = wi >= b.weeks.length - 1; }); }
     const days = E.weekDays(w);
     const c = ctx();
     const results = days.map(iso => E.computeDay(c, iso));
@@ -4204,9 +4234,50 @@ window.App = { views: {}, hooks: [], ready: [] };
   }
 
   /* ---------- 事件 ---------- */
+  /* 從浮動週次列換週時，畫面停在同一個區塊（例如同一段勤務分配表），方便前後週對照；
+     各週上方內容高度不同（備註、差假、提醒），不處理的話 iPhone Safari 上表格會上下跳 */
+  function docTop(el) { let t = 0; for (let x = el; x; x = x.offsetParent) t += x.offsetTop; return t; }
+  function viewKey(el) {
+    if (el.matches('.gridwrap')) return 'g' + Array.from($('#dayPanel').querySelectorAll('.gridwrap')).indexOf(el);
+    const h = el.querySelector('h3, h2'); return (el.className || el.tagName) + ':' + (h ? (h.firstChild ? h.firstChild.textContent : h.textContent).trim() : '');
+  }
+  function keepView(fn) {
+    const head = $('#stickHead');
+    if (!head.classList.contains('show')) { fn(); return; }
+    const y0 = head.getBoundingClientRect().bottom + 4;
+    const list = () => Array.from($('#dayPanel').querySelectorAll(':scope > *, .gridwrap'));
+    let pick = null;
+    for (const el of list()) { const top = docTop(el) - window.scrollY; if (top <= y0 && top + el.offsetHeight > y0) pick = el; }   // 取最內層（表格優先）
+    if (!pick) { fn(); return; }
+    const key = viewKey(pick), off = docTop(pick) - window.scrollY - y0;
+    fn();
+    const el2 = list().find(x => viewKey(x) === key);
+    if (el2) window.scrollTo(0, Math.max(0, docTop(el2) - y0 - off));
+  }
+  /* 捲到下方時，「選擇週次」縮成一列跟日期分頁一起浮在上方（只在日期分頁已經固定在頂端時出現，版面不會跳動） */
+  function bindMiniWeek() {
+    const head = $('#stickHead'), sen = $('#stickSentinel'), mini = $('#miniWeek');
+    let raf = 0, shown = false;
+    const upd = () => {
+      raf = 0;
+      if ($('#viewRoster').hidden || $('#weekArea').hidden) return;
+      const hdr = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--hdr')) || 60;
+      const on = sen.getBoundingClientRect().top <= hdr + 1;
+      if (on === shown) return;
+      shown = on; head.classList.toggle('show', on);
+      mini.setAttribute('aria-hidden', on ? 'false' : 'true');
+      mini.querySelectorAll('button,select').forEach(x => { x.tabIndex = on ? 0 : -1; });
+    };
+    const req = () => { if (!raf) raf = requestAnimationFrame(upd); };
+    window.addEventListener('scroll', req, { passive: true });
+    window.addEventListener('resize', req);
+    App.updMiniWeek = req;
+  }
   function bind() {
     $('#fileBase').addEventListener('change', e => { importBase(e.target.files[0]); e.target.value = ''; });
     $('#weekSel').addEventListener('change', e => { state.ui.week = e.target.value; animDay = true; save(); render(); });
+    $('#weekSel2').addEventListener('change', e => { keepView(() => { state.ui.week = e.target.value; animDay = true; save(); render(); }); });
+    bindMiniWeek();
     $('#btnExport').addEventListener('click', () => exportWeek('xlsx'));
     $('#btnExportPdf').addEventListener('click', () => exportWeek('pdf'));
     $('#btnDuplexXlsx').addEventListener('click', () => exportWeek('xlsx', true));
@@ -4215,7 +4286,7 @@ window.App = { views: {}, hooks: [], ready: [] };
     $('#modal').addEventListener('click', e => { if (e.target.id === 'modal') closeModal(); });
     document.addEventListener('keydown', e => { if (e.key === 'Escape' && $('#modal').classList.contains('open')) closeModal(); });
     $('#viewRoster').addEventListener('click', e => {
-      const t = e.target.closest('[data-day],[data-cell],[data-shift],[data-delleave],[data-skipfixed],[data-srcswitch],#btnStar,#btnAddLeave,#btnClearDay,#btnClearWeek,#btnPrevWeek,#btnNextWeek,#btnGoSettings');
+      const t = e.target.closest('[data-day],[data-cell],[data-shift],[data-delleave],[data-skipfixed],[data-srcswitch],[data-wk],#btnStar,#btnAddLeave,#btnClearDay,#btnClearWeek,#btnPrevWeek,#btnNextWeek,#btnGoSettings');
       if (t && t.id === 'btnGoSettings') { setView('settings'); return; }
       if (!t) return;
       if (t.dataset.day !== undefined) { if (state.ui.day !== +t.dataset.day) animDay = true; state.ui.day = +t.dataset.day; save(); render(); return; }
@@ -4229,9 +4300,10 @@ window.App = { views: {}, hooks: [], ready: [] };
       if (t.id === 'btnAddLeave') { addLeave(); return; }
       if (t.id === 'btnClearDay') { confirmBox(`清除 ${E.mdLabel(iso)} 的班別修改、差假與手動格子？`, '清除', () => { delete state.edits[iso]; save(); render(); }); return; }
       if (t.id === 'btnClearWeek') { confirmBox('清除本週 7 天所有的班別修改、差假與手動格子？', '清除', () => { E.weekDays(w).forEach(d => delete state.edits[d]); save(); render(); }); return; }
-      if (t.id === 'btnPrevWeek' || t.id === 'btnNextWeek') {
-        const i = state.base.weeks.findIndex(x => x.sunday === w.sunday) + (t.id === 'btnPrevWeek' ? -1 : 1);
-        if (i >= 0 && i < state.base.weeks.length) { state.ui.week = state.base.weeks[i].sunday; animDay = true; save(); render(); }
+      if (t.id === 'btnPrevWeek' || t.id === 'btnNextWeek' || t.dataset.wk) {
+        const i = state.base.weeks.findIndex(x => x.sunday === w.sunday) + (t.id === 'btnPrevWeek' || t.dataset.wk === '-1' ? -1 : 1);
+        const go = () => { state.ui.week = state.base.weeks[i].sunday; animDay = true; save(); render(); };
+        if (i >= 0 && i < state.base.weeks.length) { if (t.dataset.wk) keepView(go); else go(); }
       }
     });
     // 設定
