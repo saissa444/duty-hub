@@ -2528,11 +2528,15 @@ function buildXls(sheetName, rows, colWidths, opts={}){
   const font = (name, opt={}) => cat(u16(240, 0, opt.color ?? 0x7FFF, opt.bold ? 0x02BC : 0x0190, 0), new Uint8Array([0,0,0x88,0]), ustr8(name));
   for (let i=0;i<5;i++) rec(0x0031, font('新細明體'));        // FONT ×5 → indexes 0,1,2,3,5 (4 is skipped)
   rec(0x0031, font('新細明體', {color:0x000A, bold:true}));   // FONT index 6: red bold
+  // 數值格式：自訂 0xA4「General」、0xA5「@」（文字）。不用內建編號 49，iPhone 版 Excel 需要明確的 FORMAT 記錄
+  rec(0x041E, cat(u16(0xA4), u16(7), new Uint8Array([0]), new Uint8Array([...'General'].map(c=>c.charCodeAt(0)))));
+  rec(0x041E, cat(u16(0xA5), u16(1), new Uint8Array([0, 0x40])));
   const styleXF = hex('00 00 00 00 F5 FF 20 00 00 F4 00 00 00 00 00 00 00 00 C0 20');
-  for (let i=0;i<15;i++) rec(0x00E0, styleXF);
-  rec(0x00E0, hex('00 00 00 00 01 00 20 00 00 00 00 00 00 00 00 00 00 00 C0 20'));   // XF 15: default cell
+  rec(0x00E0, hex('00 00 A4 00 F5 FF 20 00 00 00 00 00 00 00 00 00 00 00 C0 20'));   // XF 0：Normal 樣式（General）
+  for (let i=1;i<15;i++) rec(0x00E0, styleXF);
+  rec(0x00E0, hex('00 00 A4 00 01 00 20 00 00 00 00 00 00 00 00 00 00 00 C0 20'));   // XF 15: default cell
   const xf = (fontIx, align, border) => { const b = new Uint8Array(20); const dv = new DataView(b.buffer);
-    dv.setUint16(0, fontIx, true); dv.setUint16(2, 49, true); dv.setUint16(4, 0x0001, true);   // text "@", locked
+    dv.setUint16(0, fontIx, true); dv.setUint16(2, 0xA5, true); dv.setUint16(4, 0x0001, true);   // text "@"（自訂格式 0xA5）, locked
     b[6] = align; b[9] = 0x04 | 0x08 | 0x10 | (border ? 0x20 : 0);
     if (border) { dv.setUint32(10, (0x1111 | (8 << 16) | (8 << 23)) >>> 0, true); dv.setUint32(14, 8 | (8 << 7), true); }
     dv.setUint16(18, 0x20C0, true); return b; };
@@ -2542,7 +2546,7 @@ function buildXls(sheetName, rows, colWidths, opts={}){
   rec(0x0293, hex('00 80 00 FF'));                         // STYLE: Normal
   rec(0x0160, u16(0));                                      // USESELFS
   const bs = rec(0x0085, cat(new Uint8Array(4), u16(0), ustr8(String(sheetName).slice(0, 31))));  // BOUNDSHEET (offset patched below)
-  rec(0x008C, u16(1, 886));                                 // COUNTRY
+  rec(0x008C, u16(1, 1));                                   // COUNTRY（與 Excel／LibreOffice 預設相同）
   // SST（超過一筆記錄的長度就接 CONTINUE；字串跨記錄時，下一段開頭要重寫一次字元寬度旗標）＋ EXTSST
   {
     const recs = []; let cur = Array.from(u32(sstTotal, sst.length)), recStart = len; const marks = [];
@@ -2588,6 +2592,10 @@ function buildXls(sheetName, rows, colWidths, opts={}){
   rec(0x0015, new Uint8Array(0));                           // FOOTER
   rec(0x0083, u16(0));                                      // HCENTER
   rec(0x0084, u16(0));                                      // VCENTER
+  rec(0x0026, hex('EF EE EE EE EE EE E7 3F'));               // LEFTMARGIN  0.75"
+  rec(0x0027, hex('EF EE EE EE EE EE E7 3F'));               // RIGHTMARGIN 0.75"
+  rec(0x0028, hex('00 00 00 00 00 00 F0 3F'));               // TOPMARGIN   1"
+  rec(0x0029, hex('00 00 00 00 00 00 F0 3F'));               // BOTTOMMARGIN 1"
   rec(0x00A1, hex('09 00 64 00 00 00 01 00 01 00 02 00 2C 01 2C 01 18 0C 06 83 C1 60 E0 3F 18 0C 06 83 C1 60 E0 3F 01 00'));  // SETUP：A4、直式
   rec(0x0055, u16(8));                                      // DEFCOLWIDTH
   const nRows = rows.length, nCols = Math.max(1, ...rows.map(r=>r.cells.length));
@@ -2617,8 +2625,8 @@ function buildXls(sheetName, rows, colWidths, opts={}){
   }
   rec(0x000A, new Uint8Array(0));
   let wb = cat(...parts);
-  if (wb.length < 4096) { const p = new Uint8Array(4096); p.set(wb); wb = p; }   // stay out of the mini stream
-  return cfb(wb);
+  if (opts.pad && wb.length < 4096) { const p = new Uint8Array(4096); p.set(wb); wb = p; }   // （測試用）補零到 4096
+  return wb.length < 4096 ? cfbMini(wb) : cfb(wb);
 }
 // Compound File Binary container holding one "Workbook" stream.
 function cfb(stream){
@@ -2658,8 +2666,50 @@ function cfb(stream){
   }
   return out;
 }
+
+// 小於 4096 bytes 的資料流依規格放在 mini stream（不在活頁簿資料後面補零，iPhone 版 Excel 對補零較挑剔）
+function cfbMini(stream){
+  const SS = 512, MS = 64;
+  const nMini = Math.ceil(stream.length / MS);              // ≤ 64
+  const contSec = Math.ceil(nMini * MS / SS);               // mini stream 容器佔用的一般 sector
+  const miniFatSec = contSec, dirSec = contSec + 1, fatSec = contSec + 2;
+  const total = contSec + 3;
+  const out = new Uint8Array(SS * (1 + total)); const dv = new DataView(out.buffer);
+  [0xD0,0xCF,0x11,0xE0,0xA1,0xB1,0x1A,0xE1].forEach((b,i)=>out[i]=b);
+  dv.setUint16(24, 0x003E, true); dv.setUint16(26, 3, true); dv.setUint16(28, 0xFFFE, true);
+  dv.setUint16(30, 9, true); dv.setUint16(32, 6, true);
+  dv.setUint32(44, 1, true); dv.setUint32(48, dirSec, true); dv.setUint32(56, 4096, true);
+  dv.setUint32(60, miniFatSec, true); dv.setUint32(64, 1, true); dv.setUint32(68, 0xFFFFFFFE, true); dv.setUint32(72, 0, true);
+  for (let i=0;i<109;i++) dv.setUint32(76+i*4, i === 0 ? fatSec : 0xFFFFFFFF, true);
+  out.set(stream, SS);                                      // mini stream 容器從 sector 0 開始
+  // MiniFAT
+  const mf = SS * (1 + miniFatSec);
+  for (let i=0;i<128;i++) dv.setUint32(mf + i*4, i < nMini ? (i === nMini-1 ? 0xFFFFFFFE : i+1) : 0xFFFFFFFF, true);
+  // directory
+  const d = SS * (1 + dirSec);
+  const entry = (off, name, type, child, start, size) => {
+    for (let i=0;i<name.length;i++) dv.setUint16(off+i*2, name.charCodeAt(i), true);
+    dv.setUint16(off+64, (name.length+1)*2, true); out[off+66]=type; out[off+67]=1;
+    dv.setUint32(off+68, 0xFFFFFFFF, true); dv.setUint32(off+72, 0xFFFFFFFF, true); dv.setUint32(off+76, child, true);
+    dv.setUint32(off+116, start, true); dv.setUint32(off+120, size, true);
+  };
+  entry(d, 'Root Entry', 5, 1, 0, nMini * MS);
+  [0x20,0x08,0x02,0x00, 0x00,0x00, 0x00,0x00, 0xC0,0x00, 0x00,0x00,0x00,0x00,0x00,0x46].forEach((b,i)=>{ out[d+80+i]=b; });
+  entry(d+128, 'Workbook', 2, 0xFFFFFFFF, 0, stream.length);
+  for (const off of [d+256, d+384]) { dv.setUint32(off+68,0xFFFFFFFF,true); dv.setUint32(off+72,0xFFFFFFFF,true); dv.setUint32(off+76,0xFFFFFFFF,true); }
+  // FAT
+  const fat = SS * (1 + fatSec);
+  for (let i=0;i<128;i++) {
+    let v = 0xFFFFFFFF;
+    if (i < contSec) v = i === contSec-1 ? 0xFFFFFFFE : i+1;
+    else if (i === miniFatSec || i === dirSec) v = 0xFFFFFFFE;
+    else if (i === fatSec) v = 0xFFFFFFFD;
+    dv.setUint32(fat + i*4, v, true);
+  }
+  return out;
+}
 </script>
-<script>window.APP_VERSION = 'v1.10';
+<script>window.APP_VERSION = 'v1.11';
 window.App = { views: {}, hooks: [], ready: [] };
 </script>
 <script>/* 班表111 — 在班、加班、備份與舊資料搬移 */
