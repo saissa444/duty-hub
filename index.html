@@ -1291,6 +1291,12 @@ function computeDay(ctx, iso) {
   // 某人「當天完全沒班」：當天起班的班別不存在（或全天差假）
   function hasDayShift(p, d) { return !!effShift(ctx, p, d); }
 
+  // 夜班：21 點起班的班；以及基準表把跨夜班拆成兩格（當天「21-24」＋隔天「0-9」）時，隔天 0 點起的那一段
+  function nightSeg(p, seg) {
+    if (isNightShift(seg.sh)) return true;
+    return seg.day === next && seg.sh.s === 0 && segs[p].some(y => y.day === iso && y.sh.e === 24);
+  }
+
   const cells = {};
   COL_KEYS.forEach(c => { for (let k = 0; k < SLOT_COUNT; k++) cells[c + slotRow(k)] = ''; });
   const put = {};
@@ -1306,7 +1312,7 @@ function computeDay(ctx, iso) {
     const isCore = NIGHT_CORE.includes(k);
     const isEdge = NIGHT_EDGE.includes(k);
     const avail = on.filter(x => !x.teach);
-    const night = on.filter(x => isNightShift(x.seg.sh));
+    const night = on.filter(x => nightSeg(x.p, x.seg));
 
     // 正在兼課 → 機動待命
     on.filter(x => x.teach).forEach(x => add('S', k, x.p));
@@ -1348,14 +1354,16 @@ function computeDay(ctx, iso) {
       }
     }
 
+    // 這個小時 A 會不會排在帶勤：A 在班、沒兼課、不是值星、不是夜間（22-06）機動待命
+    const aX = avail.find(y => y.p === 'A');
+    const aInG = !!aX && duty !== 'A' && !(isCore && nightSeg('A', aX.seg));
     avail.forEach(x => {
       if (x.p === duty) return;
-      const isN = isNightShift(x.seg.sh);
+      const isN = nightSeg(x.p, x.seg);
       if (isCore && isN) { add('S', k, x.p); return; }
-      if (isEdge && isN && x.p === 'B') { add(avail.some(y => y.p === 'A') ? 'I' : 'G', k, 'B'); return; } // A 也在班排業務整理，A 不在排帶勤
+      if (x.p === 'B') { add(aInG ? 'I' : 'G', k, 'B'); return; }   // A 不在帶勤（下班、差假、兼課、值星）→ B 補帶勤；A 在帶勤 → B 排業務整理
       if (isEdge && isN && x.p !== 'A') { add('S', k, x.p); return; }
       if (x.p === 'A') add('G', k, 'A');
-      else if (x.p === 'B') add(hasDayShift('A', x.seg.day) ? 'I' : 'G', k, 'B');
       else add('K', k, x.p);
     });
 
@@ -2709,7 +2717,7 @@ function cfbMini(stream){
   return out;
 }
 </script>
-<script>window.APP_VERSION = 'v1.11';
+<script>window.APP_VERSION = 'v1.12';
 window.App = { views: {}, hooks: [], ready: [] };
 </script>
 <script>/* 班表111 — 在班、加班、備份與舊資料搬移 */
