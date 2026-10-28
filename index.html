@@ -1101,7 +1101,24 @@ function dayStar(ctx, iso) {
 }
 
 /* 某人某天的實際班別（含手動修改、整天差假）→ {code,s,e,src} | null */
-function baseShift(ctx, p, iso) {
+/* 前一天上 3 號班（跨夜）且一直上到隔天 h 點（含）以後，而且最後那 1 小時人在（沒有整天差假、沒有差假蓋到那 1 小時）＝「3 號班接 1 號班」 */
+function overnightInto(ctx, p, iso, h) {
+  const prev = addDays(iso, -1);
+  const sh = baseShift(ctx, p, prev, true);
+  if (!sh || sh.code !== '3' || sh.e <= 24 || sh.e - 24 < h) return false;
+  const full = l => l.p === p && (l.s === undefined || l.s === null || l.s === '');
+  if (manualLeaves(ctx, prev).some(full)) return false;
+  if ((ctx.settings.fixedLeaves || []).some(f => f.person === p && f.allDay && teachingOn(f, prev))) return false;
+  const a = 24 + Math.min(h, sh.e - 24) - 1, b = a + 1;   // 以前一天 0 時為基準：跨夜班在隔天的最後 1 小時（到 h 點為止）
+  const hit = (s0, e0, off) => { let x = +s0, y = +e0; if (y <= x) y += 24; return off + x < b && off + y > a; };
+  for (const [d, off] of [[prev, 0], [iso, 24]]) {
+    if (manualLeaves(ctx, d).some(l => l.p === p && !full(l) && hit(l.s, l.e, off))) return false;
+    if ((ctx.settings.fixedLeaves || []).some(f => f.person === p && !f.allDay && teachingOn(f, d) && hit(f.from, f.to, off))) return false;
+  }
+  return true;
+}
+
+function baseShift(ctx, p, iso, noCarry) {
   const ov = (dayEdit(ctx, iso).shifts || {})[p];
   let cell;
   if (ov !== undefined) {
@@ -1113,7 +1130,7 @@ function baseShift(ctx, p, iso) {
   }
   if (!cell) return null;
   const def = cell.code ? ctx.base.codes[cell.code] : null;
-  let s, e;
+  let s, e, carry = false;
   if (cell.s !== undefined && cell.e !== undefined && (cell.custom || !def)) { s = cell.s; e = cell.e; }
   else if (def) {
     s = def.s; e = def.e;
@@ -1122,7 +1139,11 @@ function baseShift(ctx, p, iso) {
       const byWd = ps.shift1ByWeekday || {};
       const v = cell.variant || byWd[weekdayOf(iso)] || ps.shift1;
       const altStr = rangeLabel(def.alt.s, def.alt.e);
-      if (v === altStr) { s = def.alt.s; e = def.alt.e; }
+      if (v === altStr) {
+        // 3 號班接 1 號班：隔天的 1 號班從 09 點起（09-18），不排 08-17（3 號班的加班照跨夜規則算隔天 06-09）；當天手動指定 08-17 則照手動
+        if (!cell.variant && !noCarry && overnightInto(ctx, p, iso, def.alt.s)) carry = true;
+        else { s = def.alt.s; e = def.alt.e; }
+      }
     }
   } else return null;
   let rule = null;
@@ -1131,7 +1152,9 @@ function baseShift(ctx, p, iso) {
     const f = (ctx.settings.fixedShifts || []).find(x => x.person === p && (x.codes || []).includes(cell.code) && teachingOn(x, iso));
     if (f) { s = +f.from; e = +f.to; if (e <= s) e += 24; rule = true; }
   }
-  return { code: cell.code || '', s, e, src: ov !== undefined ? 'edit' : (rule ? 'rule' : 'base') };
+  const out = { code: cell.code || '', s, e, src: ov !== undefined ? 'edit' : (rule ? 'rule' : 'base') };
+  if (carry && !rule) out.carry = true;
+  return out;
 }
 
 function manualLeaves(ctx, iso) { return (dayEdit(ctx, iso).leaves || []); }
@@ -2521,7 +2544,7 @@ function cfb(stream){
 }
 
 </script>
-<script>window.APP_VERSION = 'v1.5';
+<script>window.APP_VERSION = 'v1.6';
 window.App = { views: {}, hooks: [], ready: [] };
 </script>
 <script>/* 班表111 — 在班、加班、備份與舊資料搬移 */
@@ -3808,10 +3831,10 @@ window.App = { views: {}, hooks: [], ready: [] };
     const rows = PERSON_ORDER.map(p => {
       const sh = r.shifts[p];
       const changed = ed.shifts && ed.shifts[p] !== undefined;
-      const ruled = sh && sh.src === 'rule';
+      const ruled = sh && sh.src === 'rule', carried = sh && sh.carry;
       const star = r.star === p ? '<span class="star">★</span>' : '';
       return `<div class="srow${changed ? ' changed' : ''}"><div class="who">${star}<b>${p}</b><span>${esc(personName(p))}</span></div>
-        <button class="shiftbtn" data-shift="${p}">${esc(shiftText(sh))}${changed ? '<em>已修改</em>' : ruled ? '<em class="rule">固定時段</em>' : ''}</button></div>`;
+        <button class="shiftbtn" data-shift="${p}">${esc(shiftText(sh))}${changed ? '<em>已修改</em>' : ruled ? '<em class="rule">固定時段</em>' : carried ? '<em class="rule">3 號班接・09 起</em>' : ''}</button></div>`;
     }).join('');
     const lvTxt = l => `<b>${esc(l.p)}</b> ${esc(l.type)} ${l.s === undefined || l.s === null || l.s === '' ? '全天' : esc(E.rangeLabel(+l.s, +l.e))}`;
     const leaves = (ed.leaves || []).map((l, i) => `<li>${lvTxt(l)}<button class="x" data-delleave="${i}" aria-label="刪除">✕</button></li>`)
@@ -3929,12 +3952,16 @@ window.App = { views: {}, hooks: [], ready: [] };
     const ov = ed.shifts ? ed.shifts[p] : undefined;
     const baseCell = c.dayMap[iso] ? c.dayMap[iso][p] : null;
     // 基準表原本
-    const c2 = E.makeContext(state.base, state.settings, {});
+    // 「依基準表」＝不含這一格的手動修改（其他天的修改照算，例如 3 號班接 1 號班時自動改 09-18）
+    const ed2 = JSON.parse(JSON.stringify(state.edits || {}));
+    if (ed2[iso] && ed2[iso].shifts) delete ed2[iso].shifts[p];
+    const c2 = E.makeContext(state.base, state.settings, ed2);
     const orig = E.baseShift(c2, p, iso);
     let opts = `<option value="base">依基準表（${esc(shiftText(orig))}）</option><option value="none">無班（輪休）</option>`;
     Object.keys(codes).forEach(k => {
       const d = codes[k];
-      opts += `<option value="c:${k}">${k} 號班 ${E.rangeLabel(d.s, d.e > 24 ? d.e - 24 : d.e)}${d.desc ? '・' + esc(d.desc.replace(/^[@★]/, '')) : ''}</option>`;
+      const mainVal = d.alt ? `c:${k}:${E.rangeLabel(d.s, d.e > 24 ? d.e - 24 : d.e)}` : `c:${k}`;   // 有兩種時段的班要記下選了哪一種
+      opts += `<option value="${mainVal}">${k} 號班 ${E.rangeLabel(d.s, d.e > 24 ? d.e - 24 : d.e)}${d.desc ? '・' + esc(d.desc.replace(/^[@★]/, '')) : ''}</option>`;
       if (d.alt) opts += `<option value="c:${k}:${E.rangeLabel(d.alt.s, d.alt.e)}">${k} 號班 ${E.rangeLabel(d.alt.s, d.alt.e)}</option>`;
     });
     opts += `<option value="custom">自訂時段…</option>`;
@@ -3942,7 +3969,11 @@ window.App = { views: {}, hooks: [], ready: [] };
     if (ov !== undefined) {
       if (ov === null || ov.none) cur = 'none';
       else if (ov.custom) { cur = 'custom'; cs = ov.s; ce = ov.e > 24 ? ov.e - 24 : ov.e; cc = ov.code || ''; }
-      else cur = 'c:' + ov.code + (ov.variant ? ':' + ov.variant : '');
+      else {
+        const d = codes[ov.code];
+        if (d && d.alt && !ov.variant) { const r0 = E.baseShift(c, p, iso); cur = 'c:' + ov.code + ':' + E.rangeLabel(r0.s, r0.e > 24 ? r0.e - 24 : r0.e); }
+        else cur = 'c:' + ov.code + (ov.variant ? ':' + ov.variant : '');
+      }
     }
     const codeOpts = `<option value="">（不指定）</option>` + Object.keys(codes).map(k => `<option value="${k}"${cc === k ? ' selected' : ''}>${k}</option>`).join('');
     openModal(`<h3>${esc(E.mdLabel(iso))} ${esc(personLabel(p))}</h3>
@@ -4060,7 +4091,7 @@ window.App = { views: {}, hooks: [], ready: [] };
         <label class="fld pf">姓名<input data-pi="${i}" data-pf="name" value="${esc(p.name)}"></label>
         <div class="fld pf p1">1 號班<div class="p1row"><select data-pi="${i}" data-pf="shift1"><option${p.shift1 === o1 ? ' selected' : ''}>${o1}</option>${o2 ? `<option${p.shift1 === o2 ? ' selected' : ''}>${o2}</option>` : ''}</select>
           ${o2 ? `<button class="btn ghost sm" data-wd="${i}">${wdSummary(p) ? '另設：' + esc(wdSummary(p)) : '依星期另設'}</button>` : ''}</div></div>
-      </div>`).join('')}</div>`;
+      </div>`).join('')}</div>${o2 ? `<p class="muted small">1 號班設 ${o2} 的人，如果是 3 號班接 1 號班，隔天的 1 號班會自動改成 ${o1}；3 號班的加班照跨夜規則算隔天 06–09。要例外時可在排班頁把當天班別改成「1 號班 ${o2}」。</p>` : ''}`;
     Array.from(document.querySelectorAll('input[name=pdfMode]')).forEach(r => { r.checked = r.value === (S.pdfMode || 'vector'); });
     $('#setFileTeam').value = S.fileTeam === undefined ? '女2' : S.fileTeam; $('#setFileMiddle').value = S.fileMiddle === undefined ? '勤務表' : S.fileMiddle;
     updateFilePreview();
