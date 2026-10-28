@@ -2474,22 +2474,57 @@ window.XLSX_IO = { readWorkbook, buildWorkbook };
   root.Core = Core;
 })(typeof window !== 'undefined' ? window : globalThis);
 </script>
-<script>// Minimal BIFF8 (.xls, Excel 97-2003) writer: one sheet of text cells.
+<script>// BIFF8 (.xls, Excel 97-2003) writer: one sheet of text cells.
 // rows: [{cells:[...], style:'head'|'cell'|'note', height:twips?}]  styles: head = bordered + wrap, cell = bordered, note = red bold
 // opts.lists: [{col, firstRow, lastRow, items:[...]}] → in-cell dropdowns (0-based rows/cols)
+// 記錄的種類與順序比照 Excel／LibreOffice 存出的 .xls（含 SST 共用字串表、版面設定等），避免 Excel 判定檔案毀損。
 function buildXls(sheetName, rows, colWidths, opts={}){
   const parts = []; let len = 0;
+  const MAXREC = 8224;
   const rec = (type, bytes) => { const b = new Uint8Array(4 + bytes.length); const dv = new DataView(b.buffer);
     dv.setUint16(0, type, true); dv.setUint16(2, bytes.length, true); b.set(bytes, 4); parts.push(b); len += b.length; return b; };
   const u16 = (...v) => { const b = new Uint8Array(v.length*2); const dv = new DataView(b.buffer); v.forEach((x,i)=>dv.setUint16(i*2, x, true)); return b; };
+  const u32 = (...v) => { const b = new Uint8Array(v.length*4); const dv = new DataView(b.buffer); v.forEach((x,i)=>dv.setUint32(i*4, x >>> 0, true)); return b; };
   const cat = (...arrs) => { const n = arrs.reduce((s,a)=>s+a.length,0); const o = new Uint8Array(n); let p=0; for (const a of arrs){ o.set(a,p); p+=a.length; } return o; };
-  const ustr16 = s => { const b = new Uint8Array(3 + s.length*2); const dv = new DataView(b.buffer); dv.setUint16(0, s.length, true); b[2]=1; for (let i=0;i<s.length;i++) dv.setUint16(3+i*2, s.charCodeAt(i), true); return b; };
   const ustr8 = s => { const b = new Uint8Array(2 + s.length*2); const dv = new DataView(b.buffer); b[0]=s.length; b[1]=1; for (let i=0;i<s.length;i++) dv.setUint16(2+i*2, s.charCodeAt(i), true); return b; };
   const hex = h => new Uint8Array(h.trim().split(/\s+/).map(x=>parseInt(x,16)));
+  const bof = dt => rec(0x0809, cat(u16(0x0600, dt, 0x0DBB, 0x07CC), u32(0, 0x06)));   // BIFF8, lowest BIFF version 6
+  const clean = v => String(v).replace(/\r\n?/g, '\n').replace(/[\u0000-\u0009\u000B-\u001F]/g, '').slice(0, 32767);
+
+  // ---- 共用字串表（儲存格一律用 LABELSST，與 Excel 存檔方式相同）
+  const sst = [], sstIx = new Map(); let sstTotal = 0;
+  const strIx = s => { sstTotal++; if (!sstIx.has(s)) { sstIx.set(s, sst.length); sst.push(s); } return sstIx.get(s); };
+  const cellRecs = [];
+  const XF = {head:16, cell:17, note:18};
+  rows.forEach((r, ri) => r.cells.forEach((v, ci) => {
+    const ix = XF[r.style] ?? 17;
+    if (v === null || v === undefined || v === '') { if (r.style !== 'note') cellRecs.push([0x0201, u16(ri, ci, ix)]); return; }   // BLANK keeps the border
+    cellRecs.push([0x00FD, cat(u16(ri, ci, ix), u32(strIx(clean(v))))]);   // LABELSST
+  }));
+
   // ---- workbook globals
-  rec(0x0809, u16(0x0600, 0x0005, 0x0DBB, 0x07CC, 0, 0, 0, 0).slice(0,16));
+  bof(0x0005);
+  rec(0x00E1, u16(0x04B0));                                 // INTERFACEHDR
+  rec(0x00C1, u16(0));                                      // MMS
+  rec(0x00E2, new Uint8Array(0));                           // INTERFACEEND
+  { const wa = new Uint8Array(112).fill(0x20); const nm = 'duty-hub'; wa[0] = nm.length; wa[1] = 0; wa[2] = 0;
+    for (let i=0;i<nm.length;i++) wa[3+i] = nm.charCodeAt(i); rec(0x005C, wa); }   // WRITEACCESS
   rec(0x0042, u16(1200));                                   // CODEPAGE: UTF-16
+  rec(0x0161, u16(0));                                      // DSF
+  rec(0x013D, u16(1));                                      // TABID
+  rec(0x009C, u16(14));                                     // FNGROUPCOUNT
+  rec(0x0019, u16(0));                                      // WINDOWPROTECT
+  rec(0x0012, u16(0));                                      // PROTECT
+  rec(0x0013, u16(0));                                      // PASSWORD
+  rec(0x01AF, u16(0));                                      // PROT4REV
+  rec(0x01BC, u16(0));                                      // PROT4REVPASS
   rec(0x003D, u16(0x0168, 0x001E, 0x3A98, 0x2328, 0x0038, 0, 0, 1, 0x0258)); // WINDOW1
+  rec(0x0040, u16(0));                                      // BACKUP
+  rec(0x008D, u16(0));                                      // HIDEOBJ
+  rec(0x0022, u16(0));                                      // DATE1904
+  rec(0x000E, u16(1));                                      // PRECISION
+  rec(0x01B7, u16(0));                                      // REFRESHALL
+  rec(0x00DA, u16(0));                                      // BOOKBOOL
   const font = (name, opt={}) => cat(u16(240, 0, opt.color ?? 0x7FFF, opt.bold ? 0x02BC : 0x0190, 0), new Uint8Array([0,0,0x88,0]), ustr8(name));
   for (let i=0;i<5;i++) rec(0x0031, font('新細明體'));        // FONT ×5 → indexes 0,1,2,3,5 (4 is skipped)
   rec(0x0031, font('新細明體', {color:0x000A, bold:true}));   // FONT index 6: red bold
@@ -2505,46 +2540,82 @@ function buildXls(sheetName, rows, colWidths, opts={}){
   rec(0x00E0, xf(0, 0x20, true));    // XF 17: data cell — bottom aligned, thin borders
   rec(0x00E0, xf(6, 0x20, false));   // XF 18: red bold note
   rec(0x0293, hex('00 80 00 FF'));                         // STYLE: Normal
-  const bs = rec(0x0085, cat(new Uint8Array(4), u16(0), ustr8(sheetName)));  // BOUNDSHEET (offset patched below)
-  const bsAt = len - bs.length;
+  rec(0x0160, u16(0));                                      // USESELFS
+  const bs = rec(0x0085, cat(new Uint8Array(4), u16(0), ustr8(String(sheetName).slice(0, 31))));  // BOUNDSHEET (offset patched below)
+  rec(0x008C, u16(1, 886));                                 // COUNTRY
+  // SST（超過一筆記錄的長度就接 CONTINUE；字串跨記錄時，下一段開頭要重寫一次字元寬度旗標）＋ EXTSST
+  {
+    const recs = []; let cur = Array.from(u32(sstTotal, sst.length)), recStart = len; const marks = [];
+    const flush = () => { recs.push(Uint8Array.from(cur)); cur = []; };
+    let streamPos = len + 4 + cur.length;   // 目前寫到的位置（含記錄標頭）
+    const dsst = Math.max(8, Math.ceil(sst.length / 128));
+    sst.forEach((s, i) => {
+      if (MAXREC - cur.length < 5) { flush(); streamPos += 4; }                 // 字串標頭不跨記錄
+      if (i % dsst === 0) marks.push([streamPos, 4 + cur.length]);              // EXTSST：字串在檔案中的位置、在該筆記錄內的位移（含標頭）
+      cur.push(s.length & 0xFF, s.length >> 8, 1); streamPos += 3;
+      let k = 0;
+      while (k < s.length) {
+        const room = Math.floor((MAXREC - cur.length) / 2);
+        if (room <= 0) { flush(); streamPos += 4; cur.push(1); streamPos += 1; continue; }
+        const n = Math.min(room, s.length - k);
+        for (let j = 0; j < n; j++) { const c = s.charCodeAt(k + j); cur.push(c & 0xFF, c >> 8); }
+        k += n; streamPos += n * 2;
+      }
+    });
+    flush();
+    recs.forEach((b, i) => rec(i === 0 ? 0x00FC : 0x003C, b));
+    void recStart;
+    rec(0x00FF, cat(u16(dsst), ...marks.map(([ib, off]) => cat(u32(ib), u16(off, 0)))));
+  }
   rec(0x000A, new Uint8Array(0));
   // ---- sheet
   const sheetStart = len;
   new DataView(bs.buffer).setUint32(4, sheetStart, true);
-  rec(0x0809, u16(0x0600, 0x0010, 0x0DBB, 0x07CC, 0, 0, 0, 0).slice(0,16));
+  bof(0x0010);
+  rec(0x000D, u16(1));                                      // CALCMODE
+  rec(0x000C, u16(100));                                    // CALCCOUNT
+  rec(0x000F, u16(1));                                      // REFMODE
+  rec(0x0011, u16(0));                                      // ITERATION
+  rec(0x0010, hex('FC A9 F1 D2 4D 62 50 3F'));               // DELTA 0.001
+  rec(0x005F, u16(1));                                      // SAVERECALC
+  rec(0x002A, u16(0));                                      // PRINTHEADERS
+  rec(0x002B, u16(0));                                      // PRINTGRIDLINES
+  rec(0x0082, u16(1));                                      // GRIDSET
+  rec(0x0080, u16(0, 0, 0, 0));                             // GUTS
+  rec(0x0225, u16(0, 0x00FF));                              // DEFAULTROWHEIGHT
+  rec(0x0081, u16(0x04C1));                                 // WSBOOL
+  rec(0x0014, new Uint8Array(0));                           // HEADER
+  rec(0x0015, new Uint8Array(0));                           // FOOTER
+  rec(0x0083, u16(0));                                      // HCENTER
+  rec(0x0084, u16(0));                                      // VCENTER
+  rec(0x00A1, hex('09 00 64 00 00 00 01 00 01 00 02 00 2C 01 2C 01 18 0C 06 83 C1 60 E0 3F 18 0C 06 83 C1 60 E0 3F 01 00'));  // SETUP：A4、直式
+  rec(0x0055, u16(8));                                      // DEFCOLWIDTH
   const nRows = rows.length, nCols = Math.max(1, ...rows.map(r=>r.cells.length));
-  const dim = new Uint8Array(14); const dd = new DataView(dim.buffer); dd.setUint32(0,0,true); dd.setUint32(4,nRows,true); dd.setUint16(8,0,true); dd.setUint16(10,nCols,true);
   (colWidths||[]).forEach((w,i) => { if (w) rec(0x007D, u16(i, i, Math.round(w*256), 15, 0, 0)); });
-  rec(0x0200, dim);
-  const XF = {head:16, cell:17, note:18};
-  rows.forEach((r, ri) => { if (r.height) { const b = new Uint8Array(16); const dv = new DataView(b.buffer);
-    dv.setUint16(0, ri, true); dv.setUint16(2, 0, true); dv.setUint16(4, r.cells.length, true); dv.setUint16(6, r.height, true);
-    dv.setUint32(12, (0x0140 | (15 << 16)) >>> 0, true); rec(0x0208, b); } });
-  rows.forEach((r, ri) => r.cells.forEach((v, ci) => {
-    const ix = XF[r.style] ?? 17;
-    if (v === null || v === undefined || v === '') { if (r.style !== 'note') rec(0x0201, u16(ri, ci, ix)); return; }   // BLANK keeps the border
-    rec(0x0204, cat(u16(ri, ci, ix), ustr16(String(v))));  // LABEL
-  }));
+  rec(0x0200, cat(u32(0, nRows), u16(0, nCols, 0)));        // DIMENSIONS
+  rows.forEach((r, ri) => {                                  // ROW：每一列都寫
+    const custom = !!r.height;
+    rec(0x0208, cat(u16(ri, 0, Math.max(1, r.cells.length), custom ? r.height : 0x00FF, 0, 0), u32((custom ? 0x0140 : 0x0100) | (15 << 16))));
+  });
+  cellRecs.forEach(([t, b]) => rec(t, b));
   rec(0x023E, u16(0x06B6, 0, 0, 0x0040, 0, 0, 0, 0, 0));   // WINDOW2 (first sheet selected)
+  rec(0x001D, cat(new Uint8Array([3]), u16(0, 0, 0, 1, 0, 0), new Uint8Array([0, 0])));   // SELECTION：A1
   const lists = opts.lists || [];
-  if (lists.length) {
-    const dval = new Uint8Array(18); const dvv = new DataView(dval.buffer);
-    dvv.setUint32(10, 0xFFFFFFFF, true); dvv.setUint32(14, lists.length, true);
-    rec(0x01B2, dval);                                        // DVAL
+  const okLists = lists.filter(L => L.lastRow >= L.firstRow && L.items.length);
+  if (okLists.length) {
+    rec(0x01B2, cat(u16(0), u32(0, 0, 0xFFFFFFFF, okLists.length)));   // DVAL
     const emptyStr = new Uint8Array([1, 0, 0, 0]);            // XLUnicodeString holding one NUL = "no text"
-    for (const L of lists) {
-      const joined = L.items.join('\0');
+    for (const L of okLists) {
+      const joined = L.items.join('\0').slice(0, 255);
       const ptg = new Uint8Array(3 + joined.length*2); ptg[0] = 0x17; ptg[1] = joined.length; ptg[2] = 1;
       const pv = new DataView(ptg.buffer); for (let i=0;i<joined.length;i++) pv.setUint16(3+i*2, joined.charCodeAt(i), true);
-      const flags = 0x3 | 0x80 | 0x100 | 0x40000 | 0x80000;  // list, explicit items, allow blank, show messages
-      const head = new Uint8Array(4); new DataView(head.buffer).setUint32(0, flags >>> 0, true);
-      rec(0x01BE, cat(head, emptyStr, emptyStr, emptyStr, emptyStr,
+      const flags = 0x3 | 0x80 | 0x100 | 0x80000;              // list, explicit items, allow blank, show error message
+      rec(0x01BE, cat(u32(flags), emptyStr, emptyStr, emptyStr, emptyStr,
         u16(ptg.length, 0), ptg, u16(0, 0),
         u16(1, L.firstRow, L.lastRow, L.col, L.col)));     // DV
     }
   }
   rec(0x000A, new Uint8Array(0));
-  void bsAt;
   let wb = cat(...parts);
   if (wb.length < 4096) { const p = new Uint8Array(4096); p.set(wb); wb = p; }   // stay out of the mini stream
   return cfb(wb);
@@ -2554,6 +2625,7 @@ function cfb(stream){
   const SS = 512, nStream = Math.ceil(stream.length/SS);
   const dirSec = nStream;
   let nFat = 1; while (nStream + 1 + nFat > nFat*128) nFat++;
+  if (nFat > 109) throw new Error('檔案太大');
   const total = nStream + 1 + nFat;
   const out = new Uint8Array(SS * (1 + total)); const dv = new DataView(out.buffer);
   const sig = [0xD0,0xCF,0x11,0xE0,0xA1,0xB1,0x1A,0xE1]; sig.forEach((b,i)=>out[i]=b);
@@ -2572,6 +2644,7 @@ function cfb(stream){
     dv.setUint32(off+116, start, true); dv.setUint32(off+120, size, true);
   };
   entry(d, 'Root Entry', 5, 1, 0xFFFFFFFE, 0);
+  [0x20,0x08,0x02,0x00, 0x00,0x00, 0x00,0x00, 0xC0,0x00, 0x00,0x00,0x00,0x00,0x00,0x46].forEach((b,i)=>{ out[d+80+i]=b; });   // CLSID：Excel 活頁簿
   entry(d+128, 'Workbook', 2, 0xFFFFFFFF, 0, stream.length);
   for (const off of [d+256, d+384]) { dv.setUint32(off+68,0xFFFFFFFF,true); dv.setUint32(off+72,0xFFFFFFFF,true); dv.setUint32(off+76,0xFFFFFFFF,true); }
   // FAT
@@ -2585,9 +2658,8 @@ function cfb(stream){
   }
   return out;
 }
-
 </script>
-<script>window.APP_VERSION = 'v1.9';
+<script>window.APP_VERSION = 'v1.10';
 window.App = { views: {}, hooks: [], ready: [] };
 </script>
 <script>/* 班表111 — 在班、加班、備份與舊資料搬移 */
