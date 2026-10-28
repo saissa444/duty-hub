@@ -151,6 +151,26 @@ input[type=date]{-webkit-appearance:none;appearance:none;display:block;width:100
 .chip{border:1px solid var(--line);background:var(--chip);color:var(--ink);border-radius:999px;min-width:44px;min-height:40px;font:inherit;font-weight:700;cursor:pointer}
 .chip.on{background:var(--brand);border-color:var(--brand);color:var(--brand-ink)}
 .tags{display:flex;flex-wrap:wrap;gap:6px;margin:2px 0 6px}
+.lvquick{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin:-2px 0 10px}
+.lvquick .btn{min-width:0;padding-left:4px;padding-right:4px;white-space:nowrap;font-size:13.5px}
+.lvcal{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px;margin:0 0 8px}
+.lvwd{text-align:center;font-size:12px;color:var(--muted);font-weight:700;padding:2px 0}
+.lvday{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;min-width:0;min-height:48px;padding:4px 1px;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:10px;font:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:background-color .15s,border-color .15s,transform .1s}
+.lvday b{font-size:13.5px;font-variant-numeric:tabular-nums;line-height:1.1}
+.lvday small{font-size:10.5px;color:var(--muted);line-height:1.1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.lvday.off{background:var(--line2)}
+.lvday.cur{border-color:var(--brand);border-width:1.5px}
+.lvday.on{background:var(--brand);border-color:var(--brand);color:var(--brand-ink)}
+.lvday.on small{color:var(--brand-ink);opacity:.9}
+.lvday:disabled{opacity:.45;cursor:not-allowed;background:var(--line2)}
+.lvday.has small{color:var(--warn)}
+.lvday:active:not(:disabled){transform:scale(.94)}
+.lvday .pdot{position:absolute;top:4px;right:4px;width:6px;height:6px;border-radius:50%;background:var(--warn)}
+.lvsum{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;font-size:14px;margin:0 0 6px}
+.lvsum .warnt{color:var(--warn);font-size:12.5px}
+.lvsel{display:flex;gap:14px}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+
 .tag{display:inline-flex;align-items:center;gap:2px;background:var(--chip);color:var(--ink);border-radius:999px;padding:2px 4px 2px 10px;font-size:13.5px}
 .tag button{border:0;background:none;color:var(--muted);cursor:pointer;min-height:28px;padding:0 6px}
 .modal{position:fixed;inset:0;background:rgba(10,15,25,.45);display:none;align-items:flex-end;justify-content:center;z-index:50;padding:0}
@@ -2567,7 +2587,7 @@ function cfb(stream){
 }
 
 </script>
-<script>window.APP_VERSION = 'v1.8';
+<script>window.APP_VERSION = 'v1.9';
 window.App = { views: {}, hooks: [], ready: [] };
 </script>
 <script>/* 班表111 — 在班、加班、備份與舊資料搬移 */
@@ -4068,8 +4088,12 @@ window.App = { views: {}, hooks: [], ready: [] };
 
   /* ---------- 差假 ---------- */
   function addLeave() {
-    const w = currentWeek(); const iso = E.weekDays(w)[state.ui.day];
-    openModal(`<h3>${esc(E.mdLabel(iso))} 登錄差假</h3>
+    const w = currentWeek(); const iso0 = E.weekDays(w)[state.ui.day];
+    const weeks = state.base.weeks;
+    const minIso = weeks[0].sunday, maxIso = E.addDays(weeks[weeks.length - 1].sunday, 6);
+    const MAX_DAYS = 62;
+    const full = l => l.s === undefined || l.s === null || l.s === '';
+    openModal(`<h3>登錄差假</h3>
       <label class="fld">人員<select id="lvP">${PERSON_ORDER.map(p => `<option value="${p}">${esc(personLabel(p))}</option>`).join('')}</select></label>
       <label class="fld">假別<select id="lvT">${E.LEAVE_TYPES.concat(state.settings.customLeaveTypes || []).map(t => `<option>${esc(t)}</option>`).join('')}<option value="__custom">自行輸入…</option></select></label>
       <label class="fld" id="lvCustomWrap" hidden>自行輸入假別<input id="lvCustom" maxlength="10" placeholder="例如：婚假、喪假、公傷假"></label>
@@ -4078,36 +4102,139 @@ window.App = { views: {}, hooks: [], ready: [] };
         <label class="fld">起<select id="lvS">${hourOptions(13, 0, 23)}</select></label>
         <label class="fld">迄<select id="lvE">${hourOptions(17, 1, 24)}</select></label>
       </div>
-      <p class="muted small">全天：這個人當天的班整個取消。指定時段：只拿掉那段時間，差假欄會寫成「A(13-17)」。補休、休假、公假以外的假別寫在「休假」格，例如「2(事假)」「3(病假13-17)」。</p>
+      <div class="row2"><label class="fld">開始日<input type="date" id="lvD1" value="${iso0}" min="${minIso}" max="${maxIso}"></label><label class="fld">結束日<input type="date" id="lvD2" value="${iso0}" min="${minIso}" max="${maxIso}"></label></div>
+      <div class="lvquick" aria-label="快速設定結束日"><button type="button" class="btn ghost sm" data-q="0">只有當天</button><button type="button" class="btn ghost sm" data-q="sat">到週六</button><button type="button" class="btn ghost sm" data-q="6">連 7 天</button><button type="button" class="btn ghost sm" data-q="13">連 14 天</button></div>
+      <div class="lvcal" id="lvCal"></div>
+      <div class="lvsum"><span id="lvCount"></span><span class="lvsel"><button type="button" class="link" id="lvSelWork">選有班的日子</button><button type="button" class="link" id="lvSelNone">全部取消</button></span></div>
+      <p class="muted small">點日期可加選或取消。預設只選這個人有上班的日子；「輪休」「不重疊」（指定時段和當天的班沒有重疊）「固定假」（設定頁的全天固定公假）不會預設選取，需要時再點選。已經有全天差假、或同一時段已登錄的日子不能重複登錄。全天：當天的班整個取消；指定時段：只拿掉那段時間，差假欄寫成「A(13-17)」。補休、休假、公假以外的假別寫在「休假」格，例如「2(事假)」「3(病假13-17)」。</p>
       <div class="btns"><button class="btn ghost" data-x="cancel">取消</button><button class="btn primary" data-x="ok">加入</button></div>`, body => {
-      const all = body.querySelector('#lvAll');
-      all.onchange = () => { body.querySelector('#lvTime').hidden = all.checked; };
-      const tsel = body.querySelector('#lvT');
-      tsel.onchange = () => { body.querySelector('#lvCustomWrap').hidden = tsel.value !== '__custom'; if (tsel.value === '__custom') body.querySelector('#lvCustom').focus(); };
-      body.querySelector('[data-x=cancel]').onclick = closeModal;
-      body.querySelector('[data-x=ok]').onclick = () => {
-        const p = body.querySelector('#lvP').value;
-        let t = body.querySelector('#lvT').value;
+      const $b = q => body.querySelector(q);
+      const all = $b('#lvAll'), pSel = $b('#lvP'), d1 = $b('#lvD1'), d2 = $b('#lvD2');
+      let picked = new Set();
+      const timeRange = () => { if (all.checked) return null; let a = +$b('#lvS').value, z = +$b('#lvE').value; if (z <= a) z += 24; return [a, z]; };
+      const clampIso = v => (!/^\d{4}-\d{2}-\d{2}$/.test(v || '') ? '' : v < minIso ? minIso : v > maxIso ? maxIso : v);
+      /* 某天的狀態：可不可以登錄、預設選不選、格子下方的小字 */
+      function dayInfo(p, d, tr) {
+        const c = ctx();
+        if (!c.weekOfDay[d]) return { ok: false, tag: '無資料' };
+        const man = editLeaves(d);
+        if (man.some(l => l.p === p && full(l))) return { ok: false, tag: '已請假', cls: 'has' };
+        const sh = E.baseShift(c, p, d);
+        const fixedFull = E.leavesOf(c, d).some(l => l.p === p && l.fixed && full(l));
+        if (tr && man.some(l => l.p === p && !full(l) && +l.s === tr[0] % 24 && +l.e === (tr[1] > 24 ? tr[1] - 24 : tr[1]))) return { ok: false, tag: '已登錄', cls: 'has' };
+        const cd = sh && sh.code ? c.base.codes[sh.code] : null;
+        let tag = !sh ? '輪休' : cd && cd.s === sh.s && cd.e === sh.e ? sh.code + ' 號班' : E.rangeLabel(sh.s, sh.e > 24 ? sh.e - 24 : sh.e);
+        let def = !!sh && !fixedFull;
+        if (fixedFull) tag = '固定假';
+        if (sh && tr) {
+          let hit = Math.max(tr[0], sh.s) < Math.min(tr[1], sh.e);
+          const prev = E.baseShift(c, p, E.addDays(d, -1));   // 前一天跨夜班延續到今天的部分
+          if (!hit && prev && prev.e > 24) hit = Math.max(tr[0], 0) < Math.min(tr[1], prev.e - 24);
+          if (!hit) { def = false; tag = '不重疊'; }
+        } else if (!sh && tr) {
+          const prev = E.baseShift(c, p, E.addDays(d, -1));
+          if (prev && prev.e > 24 && Math.max(tr[0], 0) < Math.min(tr[1], prev.e - 24)) { def = true; tag = '跨夜班'; }
+        }
+        const partial = man.filter(l => l.p === p && !full(l)).length;
+        return { ok: true, def, tag, cls: sh || def ? '' : 'off', partial };
+      }
+      function days() {
+        let a = clampIso(d1.value) || iso0, z = clampIso(d2.value) || a;
+        if (z < a) z = a;
+        const out = []; for (let d = a; d <= z && out.length < MAX_DAYS; d = E.addDays(d, 1)) out.push(d);
+        return { a, z, list: out, cut: E.addDays(a, MAX_DAYS - 1) < z };
+      }
+      function draw(resetPick) {
+        const p = pSel.value, tr = timeRange(), R = days();
+        const info = {}; R.list.forEach(d => { info[d] = dayInfo(p, d, tr); });
+        if (resetPick) {
+          picked = new Set(R.list.filter(d => info[d].ok && info[d].def));
+        } else {
+          picked = new Set([...picked].filter(d => info[d] && info[d].ok));
+        }
+        const lead = E.weekdayOf(R.list[0]);
+        let cells = E.WEEKDAY_ZH.map(x => `<div class="lvwd">${x}</div>`).join('');
+        for (let i = 0; i < lead; i++) cells += '<div></div>';
+        let lastM = '';
+        R.list.forEach((d, i) => {
+          const f = info[d], md = E.mdLabel(d), m = md.split('/')[0];
+          const lab = (i === 0 || m !== lastM || md.endsWith('/1')) ? md : md.split('/')[1]; lastM = m;
+          cells += `<button type="button" class="lvday${picked.has(d) ? ' on' : ''}${f.cls ? ' ' + f.cls : ''}${d === iso0 ? ' cur' : ''}" data-d="${d}" ${f.ok ? '' : 'disabled'} aria-pressed="${picked.has(d)}" aria-label="${E.mdLabel(d)} ${f.tag}"><b>${lab}</b><small>${esc(f.tag)}</small>${f.partial ? '<i class="pdot" title="已有部分時段差假"></i>' : ''}</button>`;
+        });
+        $b('#lvCal').innerHTML = cells;
+        const n = picked.size;
+        $b('#lvCount').innerHTML = R.list.length > 1 || n !== 1
+          ? `已選 <b>${n}</b> 天${R.cut ? `<span class="warnt">（一次最多 ${MAX_DAYS} 天，只列到 ${E.mdLabel(R.list[R.list.length - 1])}）</span>` : ''}`
+          : `${E.mdLabel(R.list[0])}（${E.WEEKDAY_ZH[E.weekdayOf(R.list[0])]}）`;
+        $b('[data-x=ok]').textContent = n > 1 ? `加入（${n} 天）` : '加入';
+        $b('[data-x=ok]').disabled = n === 0;
+      }
+      const onDate = which => () => {
+        const v1 = clampIso(d1.value), v2 = clampIso(d2.value);
+        if (which === 1 && v1 && (!v2 || v2 < v1)) d2.value = v1;
+        if (which === 2 && v2 && v1 && v2 < v1) d1.value = v2;
+        draw(true);
+      };
+      ['change', 'input'].forEach(ev => { d1.addEventListener(ev, onDate(1)); d2.addEventListener(ev, onDate(2)); });
+      body.querySelectorAll('[data-q]').forEach(btn => btn.onclick = () => {
+        const a = clampIso(d1.value) || iso0;
+        const qv = btn.dataset.q;
+        let z = qv === 'sat' ? E.addDays(a, 6 - E.weekdayOf(a)) : E.addDays(a, +qv);
+        if (z > maxIso) z = maxIso;
+        d2.value = z; draw(true);
+      });
+      $b('#lvCal').addEventListener('click', e => {
+        const t = e.target.closest('.lvday'); if (!t || t.disabled) return;
+        const d = t.dataset.d;
+        if (picked.has(d)) picked.delete(d); else picked.add(d);
+        draw(false);
+      });
+      $b('#lvSelWork').onclick = () => draw(true);
+      $b('#lvSelNone').onclick = () => { picked.clear(); draw(false); };
+      all.onchange = () => { $b('#lvTime').hidden = all.checked; draw(true); };
+      $b('#lvS').onchange = $b('#lvE').onchange = () => draw(true);
+      pSel.onchange = () => draw(true);
+      const tsel = $b('#lvT');
+      tsel.onchange = () => { $b('#lvCustomWrap').hidden = tsel.value !== '__custom'; if (tsel.value === '__custom') $b('#lvCustom').focus(); };
+      $b('[data-x=cancel]').onclick = closeModal;
+      $b('[data-x=ok]').onclick = () => {
+        const p = pSel.value;
+        let t = tsel.value;
         if (t === '__custom') {
-          t = body.querySelector('#lvCustom').value.trim().replace(/[()（）、.]/g, '');
+          t = $b('#lvCustom').value.trim().replace(/[()（）、.]/g, '');
           if (!t) { toast('請輸入假別名稱。', true); return; }
-          if (!E.LEAVE_TYPES.includes(t) && t !== '輪休') {
-            const list = state.settings.customLeaveTypes = state.settings.customLeaveTypes || [];
-            if (!list.includes(t)) list.push(t);
-          }
         }
         if (t === '輪休') { toast('輪休會依基準表自動帶入，不用登錄。', true); return; }
-        const e = edit(iso); e.leaves = e.leaves || [];
-        const item = { p, type: t };
+        let s = null, en = null;
         if (!all.checked) {
-          const s = +body.querySelector('#lvS').value, en = +body.querySelector('#lvE').value;
+          s = +$b('#lvS').value; en = +$b('#lvE').value;
           if (en === s) { toast('起訖時間相同，請重新選擇。', true); return; }
-          item.s = s; item.e = en;
-        } else if (e.leaves.some(l => l.p === p && (l.s === undefined || l.s === null))) { toast(`${p} 這天已經有全天差假。`, true); return; }
-        e.leaves.push(item); save(); closeModal(); render();
+        }
+        const tr = timeRange();
+        const list = [...picked].sort().filter(d => dayInfo(p, d, tr).ok);
+        if (!list.length) { toast('請至少選一天。', true); return; }
+        if (tsel.value === '__custom' && !E.LEAVE_TYPES.includes(t)) {
+          const cl = state.settings.customLeaveTypes = state.settings.customLeaveTypes || [];
+          if (!cl.includes(t)) cl.push(t);
+        }
+        const snap = {}; list.forEach(d => { snap[d] = state.edits[d] ? JSON.parse(JSON.stringify(state.edits[d])) : null; });
+        list.forEach(d => {
+          const e = edit(d); e.leaves = e.leaves || [];
+          const item = { p, type: t };
+          if (s !== null) { item.s = s; item.e = en; }
+          e.leaves.push(item);
+        });
+        save(); closeModal(); render();
+        const span = list.length === 1 ? E.mdLabel(list[0]) : `${E.mdLabel(list[0])}–${E.mdLabel(list[list.length - 1])} 共 ${list.length} 天`;
+        toast(`已登錄 ${p} ${t}${s !== null ? ' ' + E.rangeLabel(s, en) : ''}：${span}`, list.length > 1 ? { label: '復原', run: () => {
+          list.forEach(d => { if (snap[d]) state.edits[d] = snap[d]; else delete state.edits[d]; });
+          save(); render(); toast('已復原，這次登錄的差假都已移除。');
+        } } : undefined);
       };
+      draw(true);
     });
   }
+  function editLeaves(iso) { return (state.edits[iso] && state.edits[iso].leaves) || []; }
 
   /* ---------- 設定 ---------- */
   const WD = ['日', '一', '二', '三', '四', '五', '六'];
