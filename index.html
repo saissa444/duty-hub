@@ -626,6 +626,11 @@ pre.footer{background:var(--line2);border-radius:10px}
 .miniweek .weeklabel .wl-date{flex-wrap:nowrap}
 .btn.sq:disabled{opacity:.35;cursor:default}
 @media (max-width:340px){.miniweek .weeklabel{font-size:13px;gap:2px 5px;padding-right:24px}.miniweek .weeklabel::after{right:9px}}
+
+/* 匯入新基準表後的更新清單 */
+.updlist{list-style:none;margin:0 0 10px;padding:0;max-height:48vh;overflow:auto;border:1px solid var(--line);border-radius:var(--r-sm)}
+.updlist li{padding:8px 12px;border-bottom:1px solid var(--line2);font-size:14.5px;line-height:1.5}
+.updlist li:last-child{border-bottom:0}
 </style>
 </head>
 <body>
@@ -953,8 +958,12 @@ function looksLikeBase(rows) {
   return hasCode && hasDate;
 }
 
-function parseBase(rows) {
+/* 黃底（R、G 都很高、B 低）：基準表用來標示「這格有改過」 */
+function isYellow(hex) { if (!/^[0-9A-F]{6}$/i.test(hex || '')) return false; const r = parseInt(hex.slice(0, 2), 16), g = parseInt(hex.slice(2, 4), 16), b = parseInt(hex.slice(4, 6), 16); return r >= 0xF0 && g >= 0xD8 && b <= 0x99; }
+function parseBase(rows, fills) {
+  fills = fills || {};
   const warnings = [];
+  const legendFill = {};   // 班別代號說明列的底色（有些班別本身就塗黃色，例如 5 號班，那不算「改過」）
   const codes = {};
   let codeHeader = -1, codeCol = -1, timeCol = -1, descCol = -1;
   // 1) 找「班別代號」表頭
@@ -981,6 +990,7 @@ function parseBase(rows) {
     const def = parseCodeTime(cellStr(row[timeCol]));
     if (!def) { warnings.push(`班別代號 ${code} 的起訖時間「${cellStr(row[timeCol])}」無法辨識，已略過。`); continue; }
     codes[code] = { s: def.s, e: def.e, alt: def.alt, desc: descCol >= 0 ? cellStr(row[descCol]) : '' };
+    if (fills[r + ',' + codeCol]) legendFill[code] = fills[r + ',' + codeCol];
   }
   if (!Object.keys(codes).length) throw new Error('讀不到任何班別代號定義。');
 
@@ -1044,7 +1054,7 @@ function parseBase(rows) {
       warnings.push(`第 ${h.r + 1} 列表頭寫「${cellStr(row[h.c])}」，與實際年度不符，已忽略表頭年份。`);
     }
 
-    const week = { sunday, label, star: null, cells: {}, notes: [], extra: {} };
+    const week = { sunday, label, star: null, cells: {}, notes: [], extra: {}, marks: {} };
     for (let r = h.r + 1; r < nextR; r++) {
       const pr = rows[r] || [];
       const p = personFromLabel(pr[h.c]);
@@ -1069,6 +1079,13 @@ function parseBase(rows) {
         } else arr.push(cell);
       }
       week.cells[p] = arr;
+      const mk = arr.map((cell, i) => {
+        const col = fills[r + ',' + (dc + i)];
+        if (!isYellow(col)) return false;
+        const code = cell && cell.code;
+        return !(code && legendFill[code] && legendFill[code].toUpperCase() === col.toUpperCase());   // 跟班別本身的顏色一樣就不算
+      });
+      if (mk.some(Boolean)) week.marks[p] = mk;
       const nx = parseShiftCell(pr[dc + 7]);
       if (nx && !nx.error) week.extra[p] = nx; // 下週日（備用）
     }
@@ -1518,7 +1535,31 @@ function resolvePath(base, target) {
   return parts.join('/');
 }
 
-/* 讀取活頁簿：回傳 [{name, rows}] */
+/* 儲存格底色：讀 styles.xml，回傳每個樣式編號（s）對應的實心底色 RRGGBB（沒有底色為 null） */
+const DEFAULT_PALETTE = ('000000 FFFFFF FF0000 00FF00 0000FF FFFF00 FF00FF 00FFFF 000000 FFFFFF FF0000 00FF00 0000FF FFFF00 FF00FF 00FFFF ' +
+  '800000 008000 000080 808000 800080 008080 C0C0C0 808080 9999FF 993366 FFFFCC CCFFFF 660066 FF8080 0066CC CCCCFF ' +
+  '000080 FF00FF FFFF00 00FFFF 800080 800000 008080 0000FF 00CCFF CCFFFF CCFFCC FFFF99 99CCFF FF99CC CC99FF FFCC99 ' +
+  '3366FF 33CCCC 99CC00 FFCC00 FF9900 FF6600 666699 969696 003366 339966 003300 333300 993300 993366 333399 333333').split(' ');
+async function readFills(zip) {
+  const f = zip.file('xl/styles.xml'); if (!f) return [];
+  const doc = parseXml(await f.async('string'));
+  const pal = DEFAULT_PALETTE.slice();
+  const ic = doc.getElementsByTagNameNS(XNS, 'indexedColors')[0];
+  if (ic) Array.from(ic.getElementsByTagNameNS(XNS, 'rgbColor')).forEach((c, i) => { const v = (c.getAttribute('rgb') || '').slice(-6); if (v) pal[i] = v.toUpperCase(); });
+  const fillsEl = doc.getElementsByTagNameNS(XNS, 'fills')[0];
+  const fillColor = fillsEl ? Array.from(fillsEl.getElementsByTagNameNS(XNS, 'fill')).map(fl => {
+    const pf = fl.getElementsByTagNameNS(XNS, 'patternFill')[0];
+    if (!pf || (pf.getAttribute('patternType') || '') !== 'solid') return null;
+    const fg = pf.getElementsByTagNameNS(XNS, 'fgColor')[0]; if (!fg) return null;
+    if (fg.getAttribute('rgb')) return fg.getAttribute('rgb').slice(-6).toUpperCase();
+    if (fg.getAttribute('indexed') !== null) { const i = +fg.getAttribute('indexed'); return pal[i] || null; }
+    return null;   // 佈景主題色不判斷
+  }) : [];
+  const xfs = doc.getElementsByTagNameNS(XNS, 'cellXfs')[0];
+  return xfs ? Array.from(xfs.getElementsByTagNameNS(XNS, 'xf')).map(x => fillColor[+(x.getAttribute('fillId') || 0)] || null) : [];
+}
+
+/* 讀取活頁簿：回傳 [{name, rows, fills}]；fills：{"列,欄"（0 起算）: "RRGGBB"} */
 async function readWorkbook(buf) {
   let zip;
   try { zip = await JSZip.loadAsync(buf); }
@@ -1535,6 +1576,8 @@ async function readWorkbook(buf) {
     const ss = parseXml(await ssf.async('string'));
     shared = Array.from(ss.getElementsByTagNameNS(XNS, 'si')).map(textOfSi);
   }
+  let xfFill = [];
+  try { xfFill = await readFills(zip); } catch (e) { xfFill = []; }
   const sheets = [];
   for (const s of Array.from(wb.getElementsByTagNameNS(XNS, 'sheet'))) {
     const name = s.getAttribute('name');
@@ -1543,9 +1586,10 @@ async function readWorkbook(buf) {
     const f = zip.file(path);
     if (!f) continue;
     const doc = parseXml(await f.async('string'));
-    const rows = [];
+    const rows = [], fills = {};
     for (const c of Array.from(doc.getElementsByTagNameNS(XNS, 'c'))) {
       const a = splitAddr(c.getAttribute('r'));
+      const st = c.getAttribute('s'); if (st !== null && xfFill[+st]) fills[(a.row - 1) + ',' + (a.c - 1)] = xfFill[+st];
       const t = c.getAttribute('t');
       const vEl = c.getElementsByTagNameNS(XNS, 'v')[0];
       let v = null;
@@ -1558,7 +1602,7 @@ async function readWorkbook(buf) {
       (rows[a.row - 1] = rows[a.row - 1] || [])[a.c - 1] = v;
     }
     for (let i = 0; i < rows.length; i++) if (!rows[i]) rows[i] = [];
-    sheets.push({ name, rows });
+    sheets.push({ name, rows, fills });
   }
   return sheets;
 }
@@ -2717,7 +2761,7 @@ function cfbMini(stream){
   return out;
 }
 </script>
-<script>window.APP_VERSION = 'v1.13';
+<script>window.APP_VERSION = 'v1.14';
 window.App = { views: {}, hooks: [], ready: [] };
 </script>
 <script>/* 班表111 — 在班、加班、備份與舊資料搬移 */
@@ -3816,6 +3860,73 @@ window.App = { views: {}, hooks: [], ready: [] };
   }
 
   /* ---------- 匯入基準表 ---------- */
+  /* 匯入新基準表時整理手動修改（排班頁黃底的部分）：
+     1. 手動改的結果跟新檔案算出來的一樣 → 拿掉手動修改，不再顯示黃底（班別、值星、勤務分配表格子）
+     2. 跟新檔案不同，但新檔案在那一格有改（內容不同或標黃底）→ 先保留你的修改，列出來讓你決定要不要改用新檔案
+     差假一律保留。done：已拿掉的清單；review：保留但請確認的清單（含 apply 函式） */
+  function reconcileBase(oldBase, newBase) {
+    const weekOf = (base, iso) => base.weeks.find(x => x.sunday === E.addDays(iso, -E.weekdayOf(iso)));
+    const raw = (base, iso, p) => { const w = weekOf(base, iso); if (!w) return undefined; const c = (w.cells[p] || [])[E.weekdayOf(iso)];
+      return c ? JSON.stringify([c.code || '', c.s === undefined ? null : c.s, c.e === undefined ? null : c.e]) : 'null'; };
+    const marked = (base, iso, p) => { const w = weekOf(base, iso); return !!(w && w.marks && w.marks[p] && w.marks[p][E.weekdayOf(iso)]); };
+    const same = (a, b) => (!a && !b) || (!!a && !!b && a.s === b.s && a.e === b.e && (a.code || '') === (b.code || ''));
+    const clone = o => JSON.parse(JSON.stringify(o));
+    const done = [], review = [];
+    const days = Object.keys(state.edits).sort().filter(iso => weekOf(newBase, iso));   // 新檔案沒有的日子不動
+    // 班別、值星
+    for (const iso of days) {
+      const ed = state.edits[iso];
+      if (ed.shifts) for (const p of Object.keys(ed.shifts)) {
+        const mine = E.baseShift(E.makeContext(newBase, state.settings, state.edits), p, iso);
+        const noEd = clone(state.edits); delete noEd[iso].shifts[p];
+        const theirs = E.baseShift(E.makeContext(newBase, state.settings, noEd), p, iso);
+        const item = { iso, who: personLabel(p), from: shiftText(mine), to: shiftText(theirs) };
+        if (same(mine, theirs)) { delete ed.shifts[p]; done.push(item); continue; }
+        const newly = marked(newBase, iso, p) && !(oldBase.marksRead && marked(oldBase, iso, p));
+        if (newly || raw(oldBase, iso, p) !== raw(newBase, iso, p))
+          review.push(Object.assign(item, { why: newly ? '新檔案標黃底' : '新檔案這格有改', apply: () => { if (state.edits[iso] && state.edits[iso].shifts) { delete state.edits[iso].shifts[p]; cleanupEdit(iso); } } }));
+      }
+      if (ed.star) {
+        const nw = weekOf(newBase, iso), ow = weekOf(oldBase, iso), ns = nw.star || null, os = ow ? ow.star || null : null;
+        const item = { iso, who: '值星區隊長', from: '★ ' + personLabel(ed.star), to: '★ ' + (ns ? personLabel(ns) : '未標示') };
+        if (ed.star === ns) { delete ed.star; done.push(item); }
+        else if (ns !== os) review.push(Object.assign(item, { why: '新檔案值星有改', apply: () => { if (state.edits[iso]) { delete state.edits[iso].star; cleanupEdit(iso); } } }));
+      }
+      cleanupEdit(iso);
+    }
+    // 勤務分配表格子：手動填的內容跟新檔案自動排出來的一樣，就不再算手動修改
+    const c2 = E.makeContext(newBase, state.settings, state.edits);
+    for (const iso of days) {
+      const ed = state.edits[iso]; if (!ed || !ed.cells) continue;
+      const r = E.computeDay(c2, iso);
+      const n = Object.keys(ed.cells).filter(a => String(r.auto[a] === undefined ? '' : r.auto[a]) === String(ed.cells[a])).length;
+      Object.keys(ed.cells).forEach(a => { if (String(r.auto[a] === undefined ? '' : r.auto[a]) === String(ed.cells[a])) delete ed.cells[a]; });
+      if (n) done.push({ iso, who: '勤務分配表', from: `手動改的 ${n} 格`, to: '與新檔案自動排的相同' });
+      cleanupEdit(iso);
+    }
+    return { done, review };
+  }
+  function showBaseUpdates(res, msg, undo) {
+    const row = u => `<li><b>${esc(E.mdLabel(u.iso))}（${E.WEEKDAY_ZH[E.weekdayOf(u.iso)]}）${esc(u.who)}</b><br>`;
+    const liDone = res.done.map(u => row(u) + (u.who === '勤務分配表' ? `${esc(u.from)}，${esc(u.to)}` : `${esc(u.from)}，與新檔案相同`) + '</li>').join('');
+    const liRev = res.review.map(u => row(u) + `你改的：<b>${esc(u.from)}</b>　新檔案：<b>${esc(u.to)}</b> <span class="muted small">${esc(u.why)}</span></li>`).join('');
+    openModal(`<h3>匯入完成</h3>
+      <p class="msg">${esc(msg)}。</p>
+      ${res.done.length ? `<p class="small"><b>已和新檔案相同，不再標示黃底（${res.done.length} 處）</b></p><ul class="updlist">${liDone}</ul>` : ''}
+      ${res.review.length ? `<p class="small"><b>新檔案有改、但和你手動改的不同，先保留你的修改（${res.review.length} 處）</b></p><ul class="updlist">${liRev}</ul>
+        <button class="btn ghost block" data-x="useNew">這 ${res.review.length} 處改用新檔案</button>` : ''}
+      <p class="muted small">差假一律保留；新檔案沒動到的手動修改也保留。</p>
+      <div class="btns"><button class="btn ghost" data-x="undo">復原匯入</button><button class="btn primary" data-x="ok">知道了</button></div>`, body => {
+      body.querySelector('[data-x=ok]').onclick = closeModal;
+      body.querySelector('[data-x=undo]').onclick = () => { closeModal(); undo(); };
+      const u = body.querySelector('[data-x=useNew]');
+      if (u) u.onclick = () => {
+        const snap = JSON.parse(JSON.stringify(state.edits));
+        res.review.forEach(x => x.apply()); save(); closeModal(); render();
+        toast(`已改用新檔案：${res.review.length} 處`, { label: '復原', run: () => { state.edits = snap; save(); render(); toast('已復原，保留你原本的修改。'); } });
+      };
+    });
+  }
   async function importBase(file) {
     if (!file) return;
     try {
@@ -3825,11 +3936,17 @@ window.App = { views: {}, hooks: [], ready: [] };
       if (!cands.length) throw new Error('這個檔案裡找不到勤務基準表（需要有「班別代號」與「日期」週表頭）。');
       const finish = sh => {
         try {
-          const parsed = E.parseBase(sh.rows);
-          state.base = { fileName: file.name, sheetName: sh.name, importedAt: new Date().toISOString(), codes: parsed.codes, weeks: parsed.weeks, warnings: parsed.warnings };
+          const parsed = E.parseBase(sh.rows, sh.fills);
+          const oldBase = state.base, snap = { base: oldBase, edits: JSON.parse(JSON.stringify(state.edits || {})), week: state.ui.week };
+          const newBase = { fileName: file.name, sheetName: sh.name, importedAt: new Date().toISOString(), codes: parsed.codes, weeks: parsed.weeks, warnings: parsed.warnings, marksRead: true };
+          const upd = oldBase ? reconcileBase(oldBase, newBase) : { done: [], review: [] };
+          state.base = newBase;
           state.ui.week = null;
           save(); render();
-          toast(`已匯入「${sh.name}」，共 ${parsed.weeks.length} 週` + (parsed.warnings.length ? `，有 ${parsed.warnings.length} 項提醒` : ''));
+          const nMarks = parsed.weeks.reduce((n, w) => n + Object.values(w.marks || {}).reduce((m, a) => m + a.filter(Boolean).length, 0), 0);
+          const msg = `已匯入「${sh.name}」，共 ${parsed.weeks.length} 週` + (nMarks ? `，黃底 ${nMarks} 格` : '') + (parsed.warnings.length ? `，有 ${parsed.warnings.length} 項提醒` : '');
+          if (upd.done.length || upd.review.length) showBaseUpdates(upd, msg, () => { state.base = snap.base; state.edits = snap.edits; state.ui.week = snap.week; save(); render(); toast('已復原：回到匯入前的基準表與手動修改。'); });
+          else toast(msg);
         } catch (e) { toast(e.message, true); }
       };
       if (cands.length === 1) finish(cands[0]);
