@@ -2717,7 +2717,7 @@ function cfbMini(stream){
   return out;
 }
 </script>
-<script>window.APP_VERSION = 'v1.12';
+<script>window.APP_VERSION = 'v1.13';
 window.App = { views: {}, hooks: [], ready: [] };
 </script>
 <script>/* 班表111 — 在班、加班、備份與舊資料搬移 */
@@ -2802,7 +2802,11 @@ window.App = { views: {}, hooks: [], ready: [] };
       }
       for (const r of C.otFromRoster(ctx, br.first, br.last, hours)) {
         const src = sourceOf(C.isoOfIdx(r.shift.s - 8));
-        if (src && src.kind === 'roster') ot.push({ code: r.code, name: nameOf(r.code), start: r.start, hours: r.hours });
+        if (src && src.kind === 'roster') {
+          const duties = []; const mine = hours[r.code] || {};
+          for (let t = r.start; t < r.start + r.hours; t++) (mine[t] || []).forEach(d => { if (!duties.includes(d)) duties.push(d); });
+          ot.push({ code: r.code, name: nameOf(r.code), start: r.start, hours: r.hours, duties });
+        }
       }
     }
     for (const [id, w] of Object.entries(legacy)) {
@@ -2812,7 +2816,12 @@ window.App = { views: {}, hooks: [], ready: [] };
         shifts.push(Object.assign({}, s, { name: nameOf(s.code), role: s.role || roleOf(s.code), src: 'legacy' }));
         const si = C.idxOfKey(s.start), ei = C.idxOfKey(s.end), d0 = C.isoOfIdx(si);
         const cuts = C.teachingSlots({ settings: A.state.settings }, s.code, [E.addDays(d0, -1), d0, E.addDays(d0, 1)]);
-        for (const o of C.otFromBlock(si, ei, cuts)) ot.push({ code: s.code, name: nameOf(s.code), start: o.start, hours: o.hours });
+        for (const o of C.otFromBlock(si, ei, cuts)) {
+          const duties = [];   // 舊在班表：依 PDF 上這段時間的勤務
+          (s.segs || []).forEach(g => { const a = C.idxOfKey(g.s), b = C.idxOfKey(g.e);
+            if (a < o.start + o.hours && b > o.start) String(g.d || '').split('、').filter(Boolean).forEach(d => { if (!duties.includes(d)) duties.push(d); }); });
+          ot.push({ code: s.code, name: nameOf(s.code), start: o.start, hours: o.hours, duties });
+        }
       }
     }
     const seen = new Set();
@@ -3033,7 +3042,9 @@ window.App = { views: {}, hooks: [], ready: [] };
 
   /* ---------- 加班 ---------- */
   const OT_CATS = ['平時加班', '假日加班', '平日公假', '假日公假', '平日公差', '假日公差', '寒暑補休', '公務加班', '值勤補休', '超時服勤', '假日補休', '核派補休'];
-  const OT_REMARK = '備勤(值星)';
+  const OT_REMARK = '備勤(值星)';   // 舊版的固定備註（現在改依排班當時的勤務產生，見 remarkOf）
+  /* 加班備註：依加班那段時間在勤務分配表上的勤務，例如「備勤(值星)」「備勤(帶勤)」；跨兩種勤務時依時間先後寫「備勤(帶勤、值星)」 */
+  const remarkOf = o => (o.duties && o.duties.length ? `備勤(${o.duties.join('、')})` : '備勤');
   const OT_F = ['cat', 'date', 'time', 'hours', 'remark'];
   let otIds = readJSON(K.ids, {}), otLast = readJSON(K.idsLast, {}), otInc = readJSON(K.idsInc, {});
   let otEdits = readJSON(K.ot, {}), otMeta = readJSON(K.otMeta, {});
@@ -3046,7 +3057,7 @@ window.App = { views: {}, hooks: [], ready: [] };
     const rows = data().ot.filter(o => ymdOfIdx(o.start).slice(0, 7) === month).map(o => {
       const iso = C.isoOfIdx(o.start), wd = E.weekdayOf(iso);
       return { id: (otIds[o.name] || '').trim(), name: o.name, cat: (wd === 0 || wd === 6) ? '假日加班' : '平時加班',
-        date: iso.replace(/-/g, '/'), time: pad(((o.start % 24) + 24) % 24) + '00', hours: String(o.hours), remark: OT_REMARK, _t: o.start };
+        date: iso.replace(/-/g, '/'), time: pad(((o.start % 24) + 24) % 24) + '00', hours: String(o.hours), remark: remarkOf(o), _t: o.start };
     });
     rows.sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant') || a._t - b._t);
     return rows.map(({ _t, ...r }) => r);
@@ -3078,8 +3089,19 @@ window.App = { views: {}, hooks: [], ready: [] };
   function pendingMonths() { return Object.keys(otEdits).filter(m => pendingChange(m)).sort(); }
 
   function otBase() {
-    if (otEdits[otMonth]) return otEdits[otMonth].map(r => ({ ...r }));
+    if (otEdits[otMonth]) return refreshRemarks(otMonth, otEdits[otMonth].map(r => ({ ...r, orig: r.orig ? { ...r.orig } : r.orig })));
     return otComputed(otMonth).map(r => ({ ...r, orig: Object.fromEntries(OT_F.map(f => [f, r[f]])) }));
+  }
+  /* 手動修改過的月份：備註沒被手動改過的那幾筆，跟著目前排班更新（例如舊版一律寫「備勤(值星)」） */
+  function refreshRemarks(month, rows) {
+    const now = {}; otComputed(month).forEach(c => { const k = [c.name, c.date, c.time, c.hours].join('|'); (now[k] = now[k] || []).push(c.remark); });
+    rows.forEach(r => {
+      if (r.added || !r.orig || r.remark !== r.orig.remark) return;
+      const k = [r.name, r.orig.date, r.orig.time, r.orig.hours].join('|');
+      const v = now[k] && now[k].shift();
+      if (v && v !== r.remark) { r.remark = v; r.orig.remark = v; }
+    });
+    return rows;
   }
   function otDiffsFor(month) {
     const LABEL = { cat: '類別', date: '日期', time: '開始時間', hours: '時數', remark: '備註' };
