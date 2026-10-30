@@ -2761,7 +2761,7 @@ function cfbMini(stream){
   return out;
 }
 </script>
-<script>window.APP_VERSION = 'v1.14';
+<script>window.APP_VERSION = 'v1.15';
 window.App = { views: {}, hooks: [], ready: [] };
 </script>
 <script>/* 班表111 — 在班、加班、備份與舊資料搬移 */
@@ -3169,6 +3169,15 @@ window.App = { views: {}, hooks: [], ready: [] };
       .filter(r => (has(r.name) || known.has(r.name)) ? (!!(otIds[r.name] || '').trim() && included(r.name)) : true)
       .sort(otSorter());
   }
+  /* 匯出檔名：「(吳怡萱)女生隊2隊115年9月份加班時數彙整表.xls」；全部人員都匯出時不加括號 */
+  function otFileName(rows) {
+    const [y, m] = otMonth.split('/').map(Number);
+    // 全部人員都勾選、也都填了人員編號（沒有人被排除）才算「全部」；否則括號寫出這份檔案裡的人
+    const all = data().people.every(p => included(p.name) && !!(otIds[p.name] || '').trim());
+    const names = [...new Set(rows.map(r => r.name).filter(Boolean))];
+    const who = all || !names.length ? '' : `(${names.join('、')})`;
+    return `${who}女生隊2隊${y - 1911}年${m}月份加班時數彙整表.xls`;
+  }
   function otSorter() {
     const cmp = (a, b) => String(a).localeCompare(String(b), 'zh-Hant', { numeric: true });
     const when = (a, b) => cmp(a.date + a.time, b.date + b.time);
@@ -3368,7 +3377,7 @@ window.App = { views: {}, hooks: [], ready: [] };
       { cells: ['加班日期的格式為：包含 / 斜線，共10碼(2008/09/01)。切勿輸入2008/9/1。'], style: 'note', height: 340 }
     ];
     const bytes = buildXls('Sheet1', sheet, [10.87, 9.25, 14.99, 13.5, 17.87, 10.74, 9.5, 28.99], { lists: [{ col: 2, firstRow: 1, lastRow: rows.length, items: OT_CATS }] });
-    const name = `OT_${otMonth.replace('/', '')}.xls`;
+    const name = otFileName(rows);
     await A.deliverFile(new Blob([bytes], { type: 'application/vnd.ms-excel' }), name);
   }
 
